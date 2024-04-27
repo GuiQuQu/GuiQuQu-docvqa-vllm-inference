@@ -13,6 +13,6 @@ src/handle_ocr/*.txt
 src/handle_ocr/*.jpg
 src/handle_ocr/*.png
 **/log.jsonl
-/*.py
+/tmp.py
 /*.jsonl
 /*.json
