@@ -1,0 +1,43 @@
+/home/klwang/data/SPDocVQA/ocr/npvw0217_6.json
+420
+LLM的问题
+Question1: resposne = "" 420 新的没有包含空响应的问题
+Quesiotn2: response中带** 638
+    solution: 1. 产生layout布局时使用space代替*做占位符
+
+Question3: 输出答案包含问题中的字符串
+    solution: 给更强烈的prompt暗示
+Question4: 输出答案包含半句话  [5152|5349] [5153|5349]
+Question5: 答出中文了[5219|5349]
+Question6: [5198|5349] What the * symbol denotes? 有这样的问题
+Question7:  回复答案时,答案分了两行,但是模型只输出了第一行 5132
+Question8: 5112 回复时将答案做了扩写,给出了不存在与doc中的字符
+    solution: 给更强烈的prompt暗示
+
+2024-04-15
+在前面的问题做了修改之后,anls提升到了0.6606,但是仍然存在少量回答没有回答只回答答案,而是带出了少量的无关文本
+Question 1. 语言模型本身回答不正确
+Question 2. 模型除了给出回答之外,还给出一些无关文本
+Question 3. 模型的话说了一半然后就结束了  :essenza di wills, fiama di wills, vivel, super
+Question 4. 扩写问题
+{"p": "[175|5349]", "prompt_len": 49541, "input_ids_length": 3352, "image_path": "/home/klwang/data/SPDocVQA/images/rncj0037_1.png", "ocr_path": "/home/klwang/data/SPDocVQA/ocr/rncj0037_1.json", "question": "Which company's name is in the letterhead?", "response": "b&w", "answers": ["brown & williamson tobacco corporation"]}
+
+next step
+使用lora微调的方式控制模型的输入格式
+
+Question 5. 当问一些关于page number的问题时,由于ocr本身没有识别出来这些内容,因此模型回答为不知道
+Question 6. 有些问题询问的内容为doc中某个fig中文字的内容,这让LLM很难回答 
+
+# 2024-04-16
+Question 1. 还是存在一些模型不是抽取答案的情况
+Question 2. 模型对于答案回答了一半就停止
+Question 3. 少量的内容,模型还是携带了除了无关答案之内的文本
+Question 4. 存在模型更换表达的情况[410|5349]，[411|5349]
+上述三个问题可以进一步的改进prompt
+
+Question 5. 有些问题询问的文字内容为竖直的问题内容,因为layout目前只支持横着的文字内容,因此忽略的竖直的文字内容
+
+Question 4. 模型难以回答询问doc中图像相关的内容的问题
+Question 5. ocr识别误差,经常出现在询问page number上,因为ocr没有识别出来
+
+

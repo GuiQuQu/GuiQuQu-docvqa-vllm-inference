@@ -1,0 +1,11 @@
+accelerate
+tiktoken
+einops
+scipy
+transformers==4.37
+torch==2.1.2 
+torchvision==0.16.2 
+torchaudio==2.1.2
+deepspeed
+peft
+bitsandbytes==0.43.1
