@@ -54,14 +54,16 @@ def sp_get_layout(ocr_data: dict, placeholder: str = " ") -> str:
         right_space_cnt = cnt_star - len(line_str)
         line_str += " " * right_space_cnt
         res.append(line_str)
+    # 经过检测，发现数据中存在两个完全没有识别出ocr文本的情况
+    if len(res) == 0: return ""
     # 清除左右两侧的空格
     min_left_space_cnt = min([len(line) - len(line.lstrip()) for line in res])
     min_right_space_cnt = min([len(line) - len(line.rstrip()) for line in res])
     for i in range(len(res)):
         res[i] = res[i][min_left_space_cnt:len(res[i]) - min_right_space_cnt]
     res = "\n".join(res)
-    with open("layout.txt", "w", encoding="utf-8") as f:
-        f.write(res)
+    # with open("layout.txt", "w", encoding="utf-8") as f:
+    #     f.write(res)
     return res
 
 
@@ -183,10 +185,14 @@ def sp_get_lines_layout_by_json_path(json_path:str):
 
 
 def main():
-    json_path = "/home/klwang/data/SPDocVQA/ocr/gfhd0082_9.json"
+    # 这两个json文件中没有ocr识别结果
+    # /home/klwang/data/SPDocVQA/ocr/jzhd0227_85.json 
+    # /home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json
+    json_path = "/home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json"
+    image_path = "/home/klwang/data/SPDocVQA/images/hpbl0226_5.png"
     layout1 = sp_get_baseline_layout_by_json_path(json_path)
     layout2 = sp_get_lines_layout_by_json_path(json_path)
-    layout3 = sp_get_layout_by_json_path(json_path)
+    layout3 = sp_get_layout_by_json_path(json_path,placeholder="*")
     write_log(layout3)
     # print(len(layout))
     # print(layout)

@@ -1,7 +1,7 @@
 # 从huggingface上下载模型(利用huggingface-cli)工具
 export HF_ENDPOINT="https://hf-mirror.com"
-REPO_ID="Qwen/Qwen1.5-7B-Chat"
-LOCAL_NAME="Qwen1.5-7B-Chat"
+REPO_ID="Qwen/Qwen-VL-Chat"
+LOCAL_NAME="Qwen-VL-Chat"
 huggingface-cli download \
     --resume-download \
     $REPO_ID \

@@ -21,7 +21,7 @@ from accelerate.utils import DistributedType
 
 
 import handle_ocr
-import template
+import template 
 
 question_template = template.star_question_templatev3
 
@@ -177,34 +177,91 @@ def safe_save_model_for_hf_trainer(
         trainer._save(output_dir, state_dict=state_dict)
 
 
-def preprocess(
-    messages,
-    tokenizer: transformers.PreTrainedTokenizer,
-    max_len: int,
-) -> Dict:
-    """Preprocesses the data for supervised fine-tuning."""
+def preprocess(messages: List[List[Dict[str,str]]], 
+               tokenizer: transformers.PreTrainedTokenizer, 
+               max_len: int) -> Dict:
+    """
+        Preprocesses the data for supervised fine-tuning.
+        messages = [
+            [{"role": "system", "content": "system message 1"}, {"role": "user", "content": "user message 1"}, {"role": "assistant", "content": "assistant message 1"}],
+            [{"role": "system", "content": "system message 2"}, {"role": "user", "content": "user message 2"}, {"role": "assistant", "content": "assistant message 2"}],
+            ]
+    """
+    roles = {"system": "<|im_start|>system", "user": "<|im_start|>user", "assistant": "<|im_start|>assistant"}
 
-    texts = []
+    im_start:List[int] = tokenizer('<|im_start|>').input_ids
+    im_end:List[int] = tokenizer('<|im_end|>').input_ids
+    nl_tokens:List[int] = tokenizer('\n').input_ids
+    _system = tokenizer('system').input_ids + nl_tokens
+    _user = tokenizer('user').input_ids + nl_tokens
+    _assistant = tokenizer('assistant').input_ids + nl_tokens
+
+    # Apply prompt templates
+    input_ids, target_ids = [], []
     for i, msg in enumerate(messages):
-        texts.append(
-            tokenizer.apply_chat_template(
-                msg,
-                chat_template=TEMPLATE,
-                tokenize=True,
-                add_generation_prompt=False,
-                padding=True,
-                max_length=max_len,
-                truncation=True,
-            )
-        )
-    input_ids = torch.tensor(texts, dtype=torch.int)
-    target_ids = input_ids.clone()
-    target_ids[target_ids == tokenizer.pad_token_id] = IGNORE_TOKEN_ID
-    attention_mask = input_ids.ne(tokenizer.pad_token_id)
-
+        input_id, target = [], []
+        for j, sentence in enumerate(msg):
+            if sentence["role"] == "system":
+                system_input_id = im_start + _system + tokenizer(sentence["content"]).input_ids + im_end + nl_tokens
+                input_id += system_input_id
+                target += im_start + [IGNORE_TOKEN_ID] * (len(system_input_id) -3) + im_end + nl_tokens
+                assert len(input_id) == len(target)
+            elif sentence["role"] == "user":
+                user_input_id = im_start + _user + tokenizer(sentence["content"]).input_ids + im_end + nl_tokens
+                input_id += user_input_id
+                target += im_start + [IGNORE_TOKEN_ID] * (len(user_input_id) -3) + im_end + nl_tokens
+                assert len(input_id) == len(target)
+            elif sentence["role"] == "assistant":
+                assistant_input_id = im_start + _assistant + tokenizer(sentence["content"]).input_ids + im_end + nl_tokens
+                input_id += assistant_input_id
+                target += im_start + [IGNORE_TOKEN_ID] * len(_assistant) + assistant_input_id[len(_assistant)+len(im_start):-2] + im_end + nl_tokens
+                assert len(input_id) == len(target)
+            else:
+                raise ValueError("role must be one of [system, user, assistant]")
+        # 删除最后的nl_tokens
+        # input_id = input_id[:-1]
+        # target = target[:-1]
+        input_id += [tokenizer.pad_token_id] * (max_len - len(input_id))
+        target += [IGNORE_TOKEN_ID] * (max_len - len(target))
+        input_ids.append(input_id[:max_len])
+        target_ids.append(target[:max_len])
+    input_ids = torch.tensor(input_ids, dtype=torch.int) # [bs, max_len]
+    target_ids = torch.tensor(target_ids, dtype=torch.int)
     return dict(
-        input_ids=input_ids, target_ids=target_ids, attention_mask=attention_mask
+        input_ids=input_ids,
+        target_ids=target_ids,
+        attention_mask=input_ids.ne(tokenizer.pad_token_id),
     )
+
+# def preprocess(
+#     messages: list,
+#     tokenizer: transformers.PreTrainedTokenizer,
+#     max_len: int,
+# ) -> Dict:
+#     """Preprocesses the data for supervised fine-tuning."""
+
+#     texts = []
+#     for i, msg in enumerate(messages):
+#         input_text = tokenizer.apply_chat_template( 
+#                 msg,
+#                 chat_template=TEMPLATE,
+#                 tokenize=True,
+#                 add_generation_prompt=False,
+#                 padding=True,
+#                 max_length=max_len,
+#                 truncation=True,
+#         )
+#         texts.append(input_text)
+#         print(msg)
+#         print(texts[-1])
+#     input_ids = torch.tensor(texts, dtype=torch.int)
+#     target_ids = input_ids.clone()
+#     target_ids[target_ids == tokenizer.pad_token_id] = IGNORE_TOKEN_ID
+#     attention_mask = input_ids.ne(tokenizer.pad_token_id)
+
+#     return dict(
+#         input_ids=input_ids, target_ids=target_ids, attention_mask=attention_mask
+#     )
 
 
 class SupervisedDataset(Dataset):
@@ -236,7 +293,7 @@ class SupervisedDataset(Dataset):
 
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
-
+    system_message = "You are a helpful assistant."
     def __init__(
         self, raw_data, ocr_dir, image_dir, layout_func, tokenizer: transformers.PreTrainedTokenizer, max_len: int
     ):
@@ -259,23 +316,6 @@ class LazySupervisedDataset(Dataset):
     def __len__(self):
         return len(self.raw_data)
     
-#     {
-#     "questionId": 57418,
-#     "question": "What is the 'credo' of ITC Hotels?",
-#     "question_types": [
-#         "free_text"
-#     ],
-#     "image": "documents/snbx0223_4.png",
-#     "docId": 4806,
-#     "ucsf_document_id": "snbx0223",
-#     "ucsf_document_page_no": "4",
-#     "answers": [
-#         "Responsible Luxury",
-#         "\"Responsible Luxury\""
-#     ],
-#     "data_split": "val"
-# },
-    
     def prepare_stf_data(self, item):
         question = item["question"]
         answer = random.choice(item["answers"])
@@ -284,6 +324,7 @@ class LazySupervisedDataset(Dataset):
         layout = truncate_layout(layout, self.tokenizer, max_token_length=1024)
         prompt = question_template.format(layout = layout, question = question, answer = answer)
         messages = [
+            {"role":"system", "content": self.system_message},
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": answer}
             ]
@@ -298,6 +339,8 @@ class LazySupervisedDataset(Dataset):
             input_ids=ret["input_ids"][0],
             labels=ret["target_ids"][0],
             attention_mask=ret["attention_mask"][0],
+            question = self.raw_data[i]["question"],
+            image = self.raw_data[i]["image"]
         )
         self.cached_data_dict[i] = ret
 

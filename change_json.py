@@ -3,7 +3,7 @@
 """
 import json  
 
-json_path = "/home/klwang/data/SPDocVQA/ocr/mnbx0223_74.json"
+json_path = "/home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json"
 
 with open(json_path, "r", encoding="utf-8") as f:
     data = json.load(f)

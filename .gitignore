@@ -3,6 +3,8 @@
 .idea
 data-samples
 flash-attention
+mPLUG-DocOwl
+mPLUG-Owl
 ipynb
 obgn-mag
 output*
@@ -14,5 +16,6 @@ src/handle_ocr/*.jpg
 src/handle_ocr/*.png
 **/log.jsonl
 /tmp.py
+/tmp.txt
 /*.jsonl
 /*.json

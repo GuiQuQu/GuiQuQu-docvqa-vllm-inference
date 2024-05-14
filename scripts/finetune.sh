@@ -78,20 +78,21 @@ DISTRIBUTED_ARGS="
     --master_addr $MASTER_ADDR \
     --master_port $MASTER_PORT
 "
-
+# -- num_train_epochs 1
 torchrun $DISTRIBUTED_ARGS ${PROJECT_DIR}/src/finetune_qwen1.5.py \
     --model_name_or_path $MODEL \
     --data_path $DATA \
     --bf16 True \
-    --output_dir output_qwen1.5_sp_with-ocr_qlora \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 1 \
+    --output_dir output_qwen1.5_sp_assistant_label_qlora \
+    --max_steps 140 \
+    --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
+    --seed=2024 \
     --save_strategy "steps" \
     --save_steps 10 \
-    --save_total_limit 10 \
+    --save_total_limit 20 \
     --learning_rate 3e-4 \
     --weight_decay 0.01 \
     --adam_beta2 0.95 \
@@ -99,7 +100,7 @@ torchrun $DISTRIBUTED_ARGS ${PROJECT_DIR}/src/finetune_qwen1.5.py \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --report_to "none" \
-    --model_max_length 1152 \
+    --model_max_length 1536 \
     --lazy_preprocess True \
     --use_lora ${USE_LORA} \
     --q_lora ${Q_LORA} \

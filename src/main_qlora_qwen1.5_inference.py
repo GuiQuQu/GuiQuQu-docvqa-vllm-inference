@@ -7,12 +7,13 @@ from functools import partial
 import json
 import pathlib
 import argparse
-from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer, PreTrainedTokenizer
+from transformers import AutoModelForCausalLM
+from peft import PeftModel, PeftConfig
 from tqdm import tqdm
 
-
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import Dataset,DataLoader
 
 import handle_ocr
 import template
@@ -119,22 +120,25 @@ class EvalSPDocVQADataset(Dataset):
         #     f.write(prompt)  
         return ret
 
-
-def vllm_inference(
-    llm: LLM,
-    sampling_params: SamplingParams,
-    tokenizer: PreTrainedTokenizer,
-    prompts: List[str],
-) -> List[str]:
+def lora_model_inference(
+        lora_model: PeftModel,
+        tokenizer: PreTrainedTokenizer,
+        prompts: List[str],
+        args,
+):
     prompts = [get_prompt(p, tokenizer) for p in prompts]
-    outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=False)
-    ret = []
-    for output in outputs:
-        prompt = output.prompt
-        generateed_text = output.outputs[0].text
-        ret.append(generateed_text)
-        # print(f"Prompt: {prompt}\nGenerated text: {generateed_text!r}")
-    return ret
+    device = next(lora_model.parameters()).device
+    model_inputs = tokenizer(prompts, return_tensors="pt",padding=True, truncation=True, max_length=args.max_length).to(device)
+    generated_ids =  lora_model.generate(
+        model_inputs.input_ids,
+        attention_mask=model_inputs.attention_mask,
+        max_new_tokens=args.max_new_tokens,
+    )
+    generated_ids = [
+        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+    ]
+    responses = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+    return responses
 
 def get_layout_func(type:str):
     if type == "all-star":
@@ -146,16 +150,25 @@ def get_layout_func(type:str):
     else:
         raise ValueError("Not support layout pattern")
 
+def load_peft_model(args):
+    peft_config = PeftConfig.from_pretrained(args.adapter_name_or_path,inference_mode=True)
+    model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path,torch_dtype="auto",device_map="auto")
+    lora_model = PeftModel.from_pretrained(model, args.adapter_name_or_path)
+    lora_model.eval()
+    print("Start Merge Adapter...")
+    lora_model.base_model.merge_adapter()
+    print(f"{args.adapter_name_or_path} loaded..., dtype is {next(lora_model.parameters()).dtype}")
+    for n, p in model.named_parameters():
+        p.requires_grad = False
+    return lora_model
+
 def main(args):
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-    llm = LLM(model=args.model_name_or_path, dtype="bfloat16", max_model_len=7248,seed=args.seed)
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.8, top_k=20)
+    tokenizer = AutoTokenizer.from_pretrained(args.adapter_name_or_path, padding_side='left')
     few_shot_examples = []
     layout_func = get_layout_func(args.layout_type)
-    
+
     if args.few_shot:
         few_shot_examples = open_json(args.few_shot_example_json_path)
-
         for i in range(len(few_shot_examples)):
             e = few_shot_examples[i]
             few_shot_examples[i]["layout"] = layout_func(
@@ -182,33 +195,65 @@ def main(args):
         few_shot_examples=few_shot_examples,
         tokenizer=tokenizer,
         layout_func=layout_func,
-        max_doc_token_cnt=2048
+        max_doc_token_cnt=1024
     )
 
+    def collate_fn(batch):
+        ret = dict()
+        for key in batch[0].keys():
+            ret[key] = [d[key] for d in batch]
+        return ret
+
+    dataloader = DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=False,collate_fn=collate_fn)
+
+    lora_model = load_peft_model(args)
+    # print(f"lora_model.base_model.use_cache = {lora_model.base_model.config.use_cache}")
+    lora_model.base_model.use_cache = True
+    
+    # with open(args.log_path,"a",encoding="utf-8") as f:
+    #     for i, item in enumerate(eval_dataset):
+    #         prompt = item["prompt"]
+    #         answers = item["answers"]
+    #         input_ids = tokenizer([prompt], return_tensors="pt").input_ids
+    #         # tqdm.write(json.dumps(few_shot_examples_info,ensure_ascii=False,indent=2))
+    #         response = lora_model_inference(lora_model, tokenizer, [prompt],args)[0]
+    #         log = dict(p=f"[{i+1}|{len(eval_dataset)}]",
+    #                     prompt_len=len(prompt),
+    #                     input_ids_length=input_ids.size(-1),
+    #                     image_path=item["image_path"],
+    #                     ocr_path=item["ocr_path"],
+    #                     question=item["question"],
+    #                     response=response,
+    #                     answers=answers)
+    #         tqdm.write(json.dumps(log,ensure_ascii=False))
+    #         f.write(json.dumps(log,ensure_ascii=False) + "\n")
+
     with open(args.log_path,"a",encoding="utf-8") as f:
-        for i, item in enumerate(eval_dataset):
-            prompt = item["prompt"]
-            answers = item["answers"]
-            input_ids = tokenizer([prompt], return_tensors="pt").input_ids
+        for i, batch in enumerate(tqdm(dataloader)):
+            prompt:List[str] = batch["prompt"]
+            answers:List[List[str]] = batch["answers"]
+            input_ids = tokenizer(prompt, return_tensors="pt",padding=True,truncation=True,max_length=args.max_length).input_ids # [bs,seq_len]
             # tqdm.write(json.dumps(few_shot_examples_info,ensure_ascii=False,indent=2))
-            response = vllm_inference(llm, sampling_params, tokenizer, [prompt])[0]
-            log = dict(p=f"[{i+1}|{len(eval_dataset)}]",
-                        prompt_len=len(prompt),
-                        input_ids_length=input_ids.size(-1),
-                        image_path=item["image_path"],
-                        ocr_path=item["ocr_path"],
-                        question=item["question"],
-                        response=response,
-                        answers=answers)
-            tqdm.write(json.dumps(log,ensure_ascii=False))
-            f.write(json.dumps(log,ensure_ascii=False) + "\n")
+            responses = lora_model_inference(lora_model, tokenizer, prompt,args)
+            for j, t in enumerate(zip(responses,answers)):
+                resp,anss = t
+                log = dict(p=f"[{i*args.batch_size+j+1}|{len(eval_dataset)}]",
+                            prompt_len=len(prompt[j]),
+                            input_ids_length=input_ids.size(-1),
+                            image_path=batch["image_path"][0],
+                            ocr_path=batch["ocr_path"][0],
+                            question=batch["question"][0],
+                            response=resp,
+                            answers=anss)
+                tqdm.write(json.dumps(log,ensure_ascii=False))
+                f.write(json.dumps(log,ensure_ascii=False) + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path",
+        "--adapter_name_or_path",
         type=str,
-        default="/home/klwang/pretrain-model/Qwen1.5-7B-Chat",
+        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/output_qwen1.5_sp_assistant_label_qlora/checkpoint-210",
     )
     parser.add_argument(
         "--eval_json_data_path",
@@ -223,10 +268,19 @@ if __name__ == "__main__":
         "--data_ocr_dir", type=str, default="/home/klwang/data/SPDocVQA/ocr"
     )
     parser.add_argument(
+        "--batch_size", type=int, default=1
+    )
+    parser.add_argument(
         "--seed",type=int,default=2024
     )
     parser.add_argument(
-        "--few-shot", action="store_true",default=True,
+        "--few-shot", action="store_true",default=False,
+    )
+    parser.add_argument(
+        "--max_new_tokens", type=int, default=128
+    )
+    parser.add_argument(
+        "--max_length", type=int, default=1408
     )
     parser.add_argument(
         "--few_shot_example_json_path",
@@ -236,6 +290,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"]
     )
-    parser.add_argument("--log_path",type=str,default="../result/qwen1.5-7b-vllm_with-ocr_words_template-v3.jsonl")
+    parser.add_argument("--log_path",type=str,default="../result/qwen1.5-7b-qlora_checkpoint-210_with-ocr_no-few-shot_all-stars_template-v3.jsonl")
     args = parser.parse_args()
     main(args)
