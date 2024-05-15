@@ -1,0 +1,17 @@
+transformers==4.32.0
+torch==2.1.2
+accelerate
+tiktoken
+einops
+transformers_stream_generator==0.0.4
+scipy
+torchvision
+pillow
+tensorboard
+matplotlib
+peft
+python-Levenshtein==0.12.2
+deepspeed
+ipywidgets
+ipykernel
+optimum

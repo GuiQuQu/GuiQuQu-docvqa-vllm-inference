@@ -1,4 +1,7 @@
 
+"""
+    目前不考虑使用docowl1.5的模型
+"""
 from DocOwl1_5.docowl_infer import DocOwlInfer
 
 

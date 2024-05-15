@@ -33,7 +33,9 @@ pip install -r ./requirements-vllm.txt
 ## docowl 环境安装
 
 torch2.0.1 + cuda11.8 + flash-attn
+
 mPLUG-Owl的环境部署问题
+
 torch2.0.1 + cuda11.8 + flash-attn
 
 安装DocOwl的环境
@@ -43,11 +45,24 @@ torch2.0.1 + cuda11.8 + flash-attn
 
 ## qwen-vl 环境安装
 
+torch2.1.2 + cuda12.1
+
+qwen-vl模型不支持flash-attn
+
+```shell
+# 量化模型需要安装auto-gptq和optimum
+pip install auto-gptq --no-build-isolation
+```
+## 数据集内容
+
 有两个ocr文件中没有任何识别内容
 ```python
 # /home/klwang/data/SPDocVQA/ocr/jzhd0227_85.json
 # /home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json
 ```
 
+## 预定的计划
+
+1. 使用qwen-vl模型,加入图像信息和文本信息,进行推理
 
 
