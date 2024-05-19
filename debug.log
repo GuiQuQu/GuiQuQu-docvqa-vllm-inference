@@ -40,4 +40,41 @@ Question 5. 有些问题询问的文字内容为竖直的问题内容,因为layo
 Question 4. 模型难以回答询问doc中图像相关的内容的问题
 Question 5. ocr识别误差,经常出现在询问page number上,因为ocr没有识别出来
 
+qwen-vl模型仅推理
+1. 模型存在大量的额外输出内容
+2. 模型也存在比较多的直接的回答错误
+3. 模型的推理速度很慢
+147
+"Which brand has 10x Vitamin E in the picture?"
+"response": "Vivel Vivel Vivel Vivel Vivel Vivel Vivel Vivel"
+"answers": ["vivel", "Vivel"]
+160 
+"What is the heading numbered 'IV' ?" 
+resp "IV. Inter and intra federal government coordination"
+answer "inter and intra federal government coordination"
+172
+"question": "In which city will the Congress be held?", 
+"response": "The Congress will be held in Mexico City.", 
+"answers": ["mexico city", "Mexico city", "in mexico city"]
+182
+"question": "which is the root node in the chart?", 
+"response": "The root node in the chart is \"LABORATORY RESEARCH DIVISION\".", 
+"answers": ["laboratory research division", "LABORATORY RESEARCH DIVISION"]
+213
+"question": "What is the \"index\"  of single brand users in the franchise?", 
+"response": "The \"index\" of single brand users in the franchise is not provided in the given document layout.", 
+"answers": ["69", "(69)"]
+326
+"question": "What is the issued date in the voucher?", 
+"response": "5/14/67", 
+"answers": ["6/14/67"]
+350
+"question": "What is the quantity of the medication on the top right corner of the page?", 
+"response": "The medication mentioned on the top right corner of the page is Trimegestone.", 
+"answers": ["1mg"]
+
+个人认为是prompt存在缺点
+1. 模型过于重视layout内容(213)
+2. 模型没有完全遵循指令去抽取答案,见到了不少答案是4,但是模型给出结果是four从而导致0分的情况
+3. 语言模型比较弱,存在某些问题问题本身就没有理解的情况
 

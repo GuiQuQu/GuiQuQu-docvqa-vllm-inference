@@ -4,6 +4,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 from typing import List,Union
 from functools import partial
+import random
 import json
 import pathlib
 import argparse
@@ -15,18 +16,17 @@ from tqdm import tqdm
 
 import torch
 from torch.utils.data import Dataset,DataLoader
+import numpy as np
 
 import handle_ocr
 import template
+import utils
 
 question_template = template.star_question_template_with_img
 
 few_shot_template = question_template + "{answer}\n"
 
-def open_json(json_path: str):
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data
+
 
 #################################################### qwen1.5 模型推理 #########################################################################
 # 和 qwen-vl格式不对应,仅仅适用于被加入huggingface的transformers库的模型代码
@@ -80,10 +80,10 @@ def qwen_vl_inference(model,tokenizer,prompts:List[str],args) -> List[str]:
     responses = []
     for prompt in prompts:
         resp = model.chat(tokenizer, 
-                   prompt, 
+                   prompt,  
                    history=None, 
                    append_history=False,
-                   max_length=args.max_length,)
+                   max_new_tokens=args.max_new_tokens)
         responses.append(resp)
     
     return responses
@@ -91,21 +91,7 @@ def qwen_vl_inference(model,tokenizer,prompts:List[str],args) -> List[str]:
 
 ######################################################### 数据集 #################################################################################
 
-def truncate_layout(layout:str, 
-                    tokenizer:PreTrainedTokenizer = None, 
-                    max_token_length:int = 1024):
-    if tokenizer == None:
-        return layout
-    lines = layout.split("\n")
-    lines_input_ids = [tokenizer([l], return_tensors="pt").input_ids for l in lines]
-    reserve_lines = []
-    ids_cnt = 0
-    for i, input_ids in enumerate(lines_input_ids):
-        if ids_cnt + input_ids.size(-1) < max_token_length:
-            ids_cnt += input_ids.size(-1)
-            reserve_lines.append(lines[i])
-        else: break
-    return "\n".join(reserve_lines)
+
 
 class EvalSPDocVQADataset(Dataset):
     def __init__(
@@ -150,14 +136,14 @@ class EvalSPDocVQADataset(Dataset):
         # add few shot exmaple
         for e in self.few_shot_examples:
             text = self.few_shot_template.format(
-                layout=truncate_layout(e["layout"], self.tokenizer, self.max_doc_token_cnt), 
+                layout=utils.truncate_layout(e["layout"], self.tokenizer, self.max_doc_token_cnt), 
                 question=e["question"], 
                 answer=e["answer"]
             )
             prompt += text
         # add question
         prompt += self.question_template.format(
-            layout=truncate_layout(layout,self.tokenizer, self.max_doc_token_cnt), 
+            layout=utils.truncate_layout(layout,self.tokenizer, self.max_doc_token_cnt), 
             question=question)
         ret = dict(
             prompt=prompt,
@@ -185,12 +171,7 @@ class EvalSPDocVQADatasetWithImg(Dataset):
     ) -> None:
         super().__init__()
 
-        def load_data(json_path: str):
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data["data"]
-
-        self.data = load_data(json_data_path)
+        self.data = utils.load_data(json_data_path)
         self.image_dir = pathlib.Path(image_dir)
         self.ocr_dir = pathlib.Path(ocr_dir)
         self.layout_func = layout_func
@@ -214,16 +195,16 @@ class EvalSPDocVQADatasetWithImg(Dataset):
         # add few shot exmaple
         for e in self.few_shot_examples:
             text = self.few_shot_template.format(
-                image_path=image_path,
-                layout=truncate_layout(e["layout"], self.tokenizer, self.max_doc_token_cnt), 
+                image_path= f"<img>{image_path}</img>",
+                layout=utils.truncate_layout(e["layout"], self.tokenizer, self.max_doc_token_cnt), 
                 question=e["question"], 
                 answer=e["answer"]
             )
             prompt += text
         # add question
         prompt += self.question_template.format(
-            image_path=image_path,
-            layout=truncate_layout(layout,self.tokenizer, self.max_doc_token_cnt), 
+            image_path=f"<img>{image_path}</img>",
+            layout=utils.truncate_layout(layout,self.tokenizer, self.max_doc_token_cnt), 
             question=question)
         ret = dict(
             prompt=prompt,
@@ -236,16 +217,6 @@ class EvalSPDocVQADatasetWithImg(Dataset):
             ret.update({"answers": item["answers"]})
         return ret
 
-def get_layout_func(type:str):
-    if type == "all-star":
-        return partial(handle_ocr.sp_get_layout_by_json_path, placeholder="*")
-    elif type == "lines":
-        return handle_ocr.sp_get_lines_layout_by_json_path
-    elif type == "words":
-        return handle_ocr.sp_get_baseline_layout_by_json_path
-    else:
-        raise ValueError("Not support layout pattern")
-
 ############################################### 加载模型 ####################################################################
 
 def load_peft_model(adapter_name_or_path,trust_remote_code=False):
@@ -255,7 +226,7 @@ def load_peft_model(adapter_name_or_path,trust_remote_code=False):
     lora_model.eval()
     print("Start Merge Adapter...")
     lora_model.base_model.merge_adapter()
-    print(f"{adapter_name_or_path} loaded..., dtype is {next(lora_model.parameters()).dtype}")
+    print(f"{adapter_name_or_path} loaded, dtype is {next(lora_model.parameters()).dtype}")
     for _, p in model.named_parameters():
         p.requires_grad = False
     lora_model.base_model.use_cache = True
@@ -264,14 +235,14 @@ def load_peft_model(adapter_name_or_path,trust_remote_code=False):
 def load_model(model_name_or_path,trust_remote_code=False):
     model = AutoModelForCausalLM.from_pretrained(model_name_or_path, 
                                                  device_map="auto", 
-                                                 trust_remote_code=trust_remote_code, 
-                                                 bf16=True).eval()
+                                                 trust_remote_code=trust_remote_code).eval()
     model.generation_config = GenerationConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
     model.use_cache = True
     print(f"{model_name_or_path} loaded ..., dtype is {next(model.parameters()).dtype}")
     for _, p in model.named_parameters():
         p.requires_grad = False
     return model
+
 
 ############################################### 主函数 ####################################################################
 def main(args):
@@ -282,31 +253,21 @@ def main(args):
         raise ValueError("Only one of model_name_or_path and adapter_name_or_path should be provided")
     
     model_name_or_path:str = args.model_name_or_path if args.model_name_or_path else args.adapter_name_or_path
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side='left')
+    
+    utils.seed_everything(args.seed)
+    
+    trust_remote_code = "qwen-vl" in model_name_or_path.lower()
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side='left',trust_remote_code=trust_remote_code)
     few_shot_examples = []
-    layout_func = get_layout_func(args.layout_type)
+    layout_func = utils.get_layout_func(args.layout_type)
 
     if args.few_shot:
-        few_shot_examples = open_json(args.few_shot_example_json_path)
+        few_shot_examples = utils.open_json(args.few_shot_example_json_path)
         for i in range(len(few_shot_examples)):
             e = few_shot_examples[i]
             few_shot_examples[i]["layout"] = layout_func(
                 json_path = os.path.join(args.data_ocr_dir, e["layout"])
             )
-    
-    # # debug few_shot example
-    # few_shot_examples_info = open_json(args.few_shot_example_json_path)
-    # for i in range(len(few_shot_examples_info)):
-    #     e = few_shot_examples_info[i]
-    #     few_shot_examples_info[i]["image"] = os.path.join(args.data_image_dir, e["layout"].split(".")[0] + ".png")
-    #     few_shot_examples_info[i]["layout"] = os.path.join(args.data_ocr_dir, e["layout"])
-    #     layout = handle_ocr.sp_get_layout_by_json_path(few_shot_examples_info[i]["layout"])
-    #     few_shot_examples_info[i]["layout_length"] = len(layout)
-    #     few_shot_examples_info[i]["input_id_length"] = tokenizer([layout], return_tensors="pt").input_ids.size()[-1]
-    #     truncated_layout = truncate_layout(layout,tokenizer,2048)
-    #     few_shot_examples_info[i]["truncated_layout_length"] = len(truncated_layout)
-    #     few_shot_examples_info[i]["truncated_layout_input_id_length"] = tokenizer([truncated_layout],return_tensors="pt").input_ids.size()[-1]
 
     if not args.add_image:
         question_template = template.star_question_templatev3
@@ -350,7 +311,7 @@ def main(args):
     else:
         model = load_peft_model(model_name_or_path,trust_remote_code=trust_remote_code)
     
-    if "qwen1.5" in model_name_or_path:
+    if "qwen1.5" in model_name_or_path.lower():
         with open(args.log_path,"a",encoding="utf-8") as f:
             for i, batch in enumerate(tqdm(dataloader)):
                 prompt:List[str] = batch["prompt"]
@@ -371,18 +332,17 @@ def main(args):
                     tqdm.write(json.dumps(log,ensure_ascii=False))
                     f.write(json.dumps(log,ensure_ascii=False) + "\n")
     
-    elif "qwen-vl" in model_name_or_path:
+    elif "qwen-vl" in model_name_or_path.lower():
         with open(args.log_path, "a", encoding="utf-8") as f:
             for i, batch in enumerate(tqdm(dataloader)):
                 prompt:List[str] = batch["prompt"]
                 answers:List[List[str]] = batch["answers"]
-                _ ,input_ids = get_input_ids_for_qwen_vl(prompt,tokenizer)
                 # 目前的问题,因为qwen-vl没有提供长度截断的方法,因此目前是一条一条推理且不进行长度截断的
                 # 目前仅仅依靠truncate_layout()来进行过长截断
-                responses = qwen_vl_inference(model, tokenizer, prompt,args)
-                for j,t in enumerate(zip(responses,answers)):
-                    resp, anss = t
+                # responses = qwen_vl_inference(model, tokenizer, prompt,args)
+                for j,anss in enumerate(answers):
                     _, content_tokens = get_input_ids_for_qwen_vl(prompt[j],tokenizer)
+                    resp, _ = model.chat(tokenizer, prompt[j], history=None, append_history=False, max_new_tokens=args.max_new_tokens)
                     log = dict(p=f"[{i*args.batch_size+j+1}|{len(eval_dataset)}]",
                                 prompt_len=len(prompt[j]),
                                 input_ids_length=len(content_tokens),
@@ -398,6 +358,8 @@ def main(args):
         raise ValueError("Not support model")
     
 if __name__ == "__main__":
+    data_dir = "/root/autodl-tmp/spdocvqa-dataset"
+    project_dir = "/root/GuiQuQu-docvqa-vllm-inference"
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--adapter_name_or_path",
@@ -407,19 +369,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="",
+        default="/root/pretrain-model/Qwen-VL-Chat-Int4",
     )
     parser.add_argument(
         "--eval_json_data_path",
         type=str,
-        default="/home/klwang/data/SPDocVQA/val_v1.0_withQT.json",
+        default= os.path.join(data_dir,"val_v1.0_withQT.json"),
     )
     
     parser.add_argument(
-        "--data_image_dir", type=str, default="/home/klwang/data/SPDocVQA/images"
+        "--data_image_dir", type=str, default=os.path.join(data_dir,"images")
+
     )
     parser.add_argument(
-        "--data_ocr_dir", type=str, default="/home/klwang/data/SPDocVQA/ocr"
+        "--data_ocr_dir", type=str, default=os.path.join(data_dir,"ocr")
     )
     parser.add_argument(
         "--batch_size", type=int, default=1
@@ -428,7 +391,7 @@ if __name__ == "__main__":
         "--seed",type=int,default=2024
     )
     parser.add_argument(
-        "--few-shot", action="store_true",default=False,
+        "--few-shot", action="store_true",default=True,
     )
     parser.add_argument(
         "--max_new_tokens", type=int, default=128
@@ -438,16 +401,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     parser.add_argument(
-        "--add_image", action="store_true",default=False,
+        "--add_image", action="store_true",default=True,
     )
     parser.add_argument(
         "--few_shot_example_json_path",
         type=str,
-        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/few_shot_examples/sp_few_shot_example.json",
+        default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"),
     )
     parser.add_argument(
         "--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"]
     )
-    parser.add_argument("--log_path",type=str,default="../result/qwen1.5-7b-qlora_checkpoint-210_with-ocr_no-few-shot_all-stars_template-v3.jsonl")
+    parser.add_argument("--log_path",type=str,default="../result/qwen-vl_no-sft_with-ocr_all-star_template-with-img_with-image_few-shot.jsonl")
     args = parser.parse_args()
     main(args)

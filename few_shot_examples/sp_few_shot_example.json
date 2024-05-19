@@ -1,15 +1,18 @@
 [
     {
+        "image": "xnbl0037_1.png",
         "layout": "xnbl0037_1.json",
         "question": "what is the date mentioned in this letter?",
         "answer": "1/8/93"
     },
     {
+        "image": "xnbl0037_1.png",
         "layout": "nmcj0037_1.json",
         "question": "Where was the conference held?",
         "answer": "B&W headquarters"
     },
     {
+        "image" : "xnbl0037_1.png",
         "layout": "hgbl0037_9.json",
         "question": "What is the S.D. mentioned in the DOSE-ug 0.0000 in the third table?",
         "answer": "10.6"

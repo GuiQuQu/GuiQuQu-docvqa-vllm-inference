@@ -5,6 +5,7 @@ data-samples
 flash-attention
 mPLUG-DocOwl
 mPLUG-Owl
+.ipynb_checkpoints
 ipynb
 obgn-mag
 output*
@@ -19,3 +20,6 @@ src/handle_ocr/*.png
 /tmp.txt
 /*.jsonl
 /*.json
+**/SimSun.ttf
+/test.jpg
+/tiger.jpeg

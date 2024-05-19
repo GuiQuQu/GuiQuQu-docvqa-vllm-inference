@@ -15,3 +15,4 @@ deepspeed
 ipywidgets
 ipykernel
 optimum
+lmdeploy==0.4.1

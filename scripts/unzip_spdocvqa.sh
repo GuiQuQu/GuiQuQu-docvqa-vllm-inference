@@ -1,5 +1,5 @@
 # 一键解压mpdocvqa数据
-DATA_DIR="/home/klwang/data/SPDocVQA"
+DATA_DIR="/root/autodl-tmp/spdocvqa-dataset"
 # DATA_DIR="/root/autodl-tmp/data"
 
 QAS_ZIP_FILE="spdocvqa_qas.zip"
@@ -56,7 +56,7 @@ fi
 # 解压模型文件
 # 检查压缩文件是否存在
 if [ ! -f $MODEL_DIR/${MODEL_TAR_FILE} ]; then
-    echo "model file don't exist, skip unzip model file..."
+    echo "模型文件不存在,跳过解压模型文件..."
     exit 1
 fi
 echo "正在解压 ${MODEL_TAR_FILE}..."

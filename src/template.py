@@ -51,6 +51,34 @@ Document:
 Question: {question}
 Answer:"""
 
+"""
+<|im_start|>\nnYou are a helpful assistant.<|im_end|>\nuser\nPicture 0:{image_path}\n
+"""
+
+vl_ocr_question_template = """Picture 0: {image_path}
+Integrating the document image and text layout infomation, please answer the question. layout will be included by "```", image will start with "Picture 0"
+Notice:
+(1) answer the question based on the layout and image, and answer the question using text that appears in layout and image.
+(2) Please DO NOT appear the '*' in your answer
+Layout:
+```
+{layout}
+```
+Question: {question}
+Answer:"""
+
+lmdeploy_vl_ocr_question_template = """Integrating the document image and text layout infomation, please answer the question. layout will be included by "```", image will start with "Picture 0"
+Notice:
+(1) answer the question based on the layout and image, and answer the question using text that appears in layout and image.
+(2) Please DO NOT appear the '*' in your answer
+Layout:
+```
+{layout}
+```
+Question: {question}
+Answer:"""
+
+
 hat_question_templatev1 = """The following is a string layout of a document picture, including by "```", and in the layout, I use "^" as placeholder, the text segment should fill not only the space of the text, but also the space of '^' segment when a text segment is following by the segment of '^'.
 Notice:
 (1) You should answer the qeuistion based on the layout information, using the words appeared in the layout is best.

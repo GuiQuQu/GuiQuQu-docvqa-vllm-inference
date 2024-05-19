@@ -2,8 +2,7 @@
 export HF_ENDPOINT="https://hf-mirror.com"
 REPO_ID="Qwen/Qwen-VL-Chat"
 LOCAL_NAME="Qwen-VL-Chat"
+MODEL_DIR="$HOME/autodl-tmp/pretrain-model"
 huggingface-cli download \
-    --resume-download \
     $REPO_ID \
-    --local-dir $HOME/pretrain-model/$LOCAL_NAME \
-    --local-dir-use-symlinks False
+    --local-dir $MODEL_DIR/$LOCAL_NAME \
