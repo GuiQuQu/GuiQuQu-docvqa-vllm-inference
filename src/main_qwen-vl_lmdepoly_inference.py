@@ -1,4 +1,8 @@
+"""
+    shit lmdeploy
+"""
 from typing import List, Dict, Union, Tuple
+import copy
 import os
 import json
 from tqdm import tqdm
@@ -17,7 +21,7 @@ prompt_template =  lmdeploy_vl_ocr_question_template
 
 few_shot_vl_ocr_question_template =prompt_template + "{answer}\n"
 
-@MODELS.register_module(name='qwen-vl-chat')
+@MODELS.register_module(name='qwen-vl-chat-few-shot')
 class QwenVLChatTemplate(Qwen7BChat):
     """Qwen vl chat template."""
 
@@ -32,7 +36,7 @@ class QwenVLChatTemplate(Qwen7BChat):
         self.top_p = top_p
         self.top_k = top_k
         self.temperature = temperature
-
+    
     def _concat_image_info(self, prompt):
         """Append image placeholder."""
         if isinstance(prompt, str):
@@ -43,6 +47,17 @@ class QwenVLChatTemplate(Qwen7BChat):
             res += f'Picture {str(i)}:<img>placeholder</img>\n'
         prompt = res + prompt
         return prompt
+    
+    def init_few_shot_prompt(self,few_shot_json_path):
+        few_shot_examples = utils.load_data(few_shot_json_path)
+        for i in range(len(few_shot_examples)):
+            e = few_shot_examples[i]
+            few_shot_examples[i]["layout"] = self.layout_func(
+                json_path = self.ocr_dir / e["layout"]
+            )
+        """
+
+        """
 
     def get_prompt(self, prompt, sequence_start=True):
         """Apply chat template to prompt."""
@@ -64,7 +79,7 @@ class QwenVLChatTemplate(Qwen7BChat):
             if len(messages) and messages[0]['role'] != 'system':
                 ret += f'{self.system}{self.meta_instruction}{self.eosys}'
         for message in messages:
-            role = message['role']
+            role = message['role'] 
             content = message['content']
             if role == 'user' and not isinstance(content, str):
                 content = [content[0]['text'], len(content) - 1]
@@ -95,7 +110,8 @@ class EvalSPDocVQADatasetWithImg(Dataset):
         self.tokenizer = tokenizer
         self.max_doc_token_cnt = max_doc_token_cnt
         self.question_template = question_template
-        self.init_few_shot_examples(utils.open_json(few_shot_example_json_path))
+        self.few_shot_prompt = []
+        # self.init_few_shot_examples(utils.open_json(few_shot_example_json_path))
     
     def init_few_shot_examples(self,few_shot_examples:List[Dict]):
         for i in range(len(few_shot_examples)):
@@ -141,7 +157,7 @@ class EvalSPDocVQADatasetWithImg(Dataset):
         t_layout = utils.truncate_layout(layout, self.tokenizer, self.max_doc_token_cnt)
 
         # add few shot str
-        prompt = self.few_shot_prompt
+        prompt = copy.deepcopy(self.few_shot_prompt)
         text = self.question_template.format(layout = t_layout,question =question)
         message = {
             'role':'user',
@@ -166,12 +182,13 @@ def main():
         backend_config=TurbomindEngineConfig(
             session_len=8192,
         ),
-        chat_template_config=ChatTemplateConfig(model_name="qwen-7b"),
-        log_level="INFO",
+        chat_template_config=ChatTemplateConfig(model_name="qwen-vl-chat-few-shot"),
+        # log_level="INFO",
     )
     gen_config = GenerationConfig(
         top_k=0,top_p=0.5,max_new_tokens=128
     )
+    # tokenizer = pipe.tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side='left',trust_remote_code=True)
     eval_dataset = EvalSPDocVQADatasetWithImg(
         json_data_path="/root/autodl-tmp/spdocvqa-dataset/val_v1.0_withQT.json",
@@ -181,9 +198,11 @@ def main():
         layout_func=utils.get_layout_func("all-star"),
         tokenizer=tokenizer
     )
-    with open("/root/GuiQuQu-docvqa-vllm-inference/result/eval_result_lmdeploy_debug.jsonl","w") as f:
-        for i, batch in enumerate(eval_dataset):
-            resp = pipe(batch["prompt"], gen_config=gen_config)
+    with open("/root/GuiQuQu-docvqa-vllm-inference/result/qwen-vl_lmdeploy_zero-shot-with-img.jsonl","a", encoding="utf-8") as f:
+        for i, batch in (enumerate(tqdm(eval_dataset))):
+            if i >= 50:
+                break
+            resp = pipe.batch_infer(batch["prompt"], gen_config=gen_config)
             log = dict(p=f"[{i}|{len(eval_dataset)}]",
                         input_ids_length=resp.input_token_len,
                         image_path=batch["image_path"],
@@ -191,11 +210,9 @@ def main():
                         question=batch["question"],
                         response=resp.text,
                         answers=batch["answers"])
-            print(resp)
             tqdm.write(json.dumps(log,ensure_ascii=False))
             f.write(json.dumps(log,ensure_ascii=False) + "\n")
-            if i == 1:
-                break
+
 
 if __name__ == "__main__":
     main()

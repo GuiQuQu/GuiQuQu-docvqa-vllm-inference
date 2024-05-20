@@ -34,6 +34,18 @@ Document:
 Question: {question}
 Answer:"""
 
+star_question_templatev4 = """The following is a string layout of a document picture, including by "```".
+Notice:
+(1) You should answer the qeuistion based on the layout information, using the words appeared in the layout is best.
+(2) Please DO NOT appear the '*' in your answer.
+(3) Please extract the answer of the question from the given document layout.
+Document:
+```
+{layout}
+```
+Question: {question}
+Answer:"""
+
 star_question_template_with_img = """The following is a document image and its corresponding string layout of a document picture, including by "```", and in the layout, I use "*" as placeholder, the text segment should fill not only the space of the text, but also the space of '*' segment when a text segment is following by the segment of '*'.
 Please extract the answer of the question from the given document layout.
 Notice:
@@ -55,12 +67,24 @@ Answer:"""
 <|im_start|>\nnYou are a helpful assistant.<|im_end|>\nuser\nPicture 0:{image_path}\n
 """
 
-vl_ocr_question_template = """Picture 0: {image_path}
-Integrating the document image and text layout infomation, please answer the question. layout will be included by "```", image will start with "Picture 0"
+
+vl_ocr_question_template = """
+The following is a document image and its corresponding string layout of a document picture, including by "```".Please extract the answer from the document layout based on the document image.
+
+Document Layout Notice:
+In the layout, "*" is used as the placeholder, this meaning the text segment should fill text part and "*" part in document picture.
+
+Document Picture Notice:
+If you don't find answer from the document layout,please answer the question based on the picture.
+
 Notice:
-(1) answer the question based on the layout and image, and answer the question using text that appears in layout and image.
+(1) Answer the question based on the layout and image, and answer the question using text that appears in layout and image.
 (2) Please DO NOT appear the '*' in your answer
-Layout:
+Document Picture:
+```
+{image_path}
+```
+Document Layout:
 ```
 {layout}
 ```
