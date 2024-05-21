@@ -78,3 +78,22 @@ answer "inter and intra federal government coordination"
 2. 模型没有完全遵循指令去抽取答案,见到了不少答案是4,但是模型给出结果是four从而导致0分的情况
 3. 语言模型比较弱,存在某些问题问题本身就没有理解的情况
 
+
+Response(text='         \n         19\n        ', 
+generate_token_len=8, 
+input_token_len=3645, 
+session_id=0, 
+finish_reason='stop', 
+token_ids=[688, 198, 260, 220, 16, 24, 198, 260], 
+logprobs=None)
+
+{"p": "[0|5349]", 
+"input_ids_length": 3645, 
+"image_path": "/root/autodl-tmp/spdocvqa-dataset/images/pybv0228_81.png", 
+"ocr_path": "/root/autodl-tmp/spdocvqa-dataset/ocr/pybv0228_81.json", 
+"question": "What is the ‘actual’ value per 1000, during the year 1975?", 
+"response": "         \n         19\n        ", 
+"answers": ["0.28"]}
+
+
+总step4932

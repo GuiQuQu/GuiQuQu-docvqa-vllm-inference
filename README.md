@@ -53,6 +53,13 @@ qwen-vl模型不支持flash-attn
 # 量化模型需要安装auto-gptq和optimum
 pip install auto-gptq --no-build-isolation
 ```
+
+qlora微调使用deepspeed时还需要安装`mpi4py`
+推荐使用conda安装
+```shell
+conda install mpi4py
+```
+
 ## 数据集内容
 
 有两个ocr文件中没有任何识别内容

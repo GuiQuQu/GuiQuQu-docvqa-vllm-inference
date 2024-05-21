@@ -110,8 +110,8 @@ class EvalSPDocVQADatasetWithImg(Dataset):
         self.tokenizer = tokenizer
         self.max_doc_token_cnt = max_doc_token_cnt
         self.question_template = question_template
-        self.few_shot_prompt = []
-        # self.init_few_shot_examples(utils.open_json(few_shot_example_json_path))
+        # self.few_shot_prompt = []
+        self.init_few_shot_examples(utils.open_json(few_shot_example_json_path))
     
     def init_few_shot_examples(self,few_shot_examples:List[Dict]):
         for i in range(len(few_shot_examples)):
@@ -134,7 +134,7 @@ class EvalSPDocVQADatasetWithImg(Dataset):
                 },
                 {
                     'role': 'assistant',
-                    'content': e['answer']
+                    'content': [{'type':'text','text':e['answer']}]
                 }
             ]
             few_shot_prompt.extend(messages)
@@ -183,7 +183,7 @@ def main():
             session_len=8192,
         ),
         chat_template_config=ChatTemplateConfig(model_name="qwen-vl-chat-few-shot"),
-        # log_level="INFO",
+        log_level="INFO",
     )
     gen_config = GenerationConfig(
         top_k=0,top_p=0.5,max_new_tokens=128
@@ -200,7 +200,7 @@ def main():
     )
     with open("/root/GuiQuQu-docvqa-vllm-inference/result/qwen-vl_lmdeploy_zero-shot-with-img.jsonl","a", encoding="utf-8") as f:
         for i, batch in (enumerate(tqdm(eval_dataset))):
-            if i >= 50:
+            if i == 2:
                 break
             resp = pipe.batch_infer(batch["prompt"], gen_config=gen_config)
             log = dict(p=f"[{i}|{len(eval_dataset)}]",
