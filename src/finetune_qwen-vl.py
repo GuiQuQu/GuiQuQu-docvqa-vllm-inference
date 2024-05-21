@@ -168,13 +168,13 @@ def preprocess(
                 _input_id, _target = get_system_message(system_message)
                 input_id += _input_id
                 target += _target
-                assert len(_input_id) == len(_target)
+                assert len(input_id) == len(target)
 
             if sentence["role"] == "system":
                 _input_id, _target = get_system_message(sentence["content"])
                 input_id += _input_id
                 target += _target
-                assert len(_input_id) == len(_target)
+                assert len(input_id) == len(target)
             elif sentence["role"] == "user":
                 user_input_id = im_start + _user + tokenizer(sentence["content"]).input_ids + im_end + nl_tokens
                 input_id += user_input_id
@@ -194,6 +194,12 @@ def preprocess(
         input_ids.append(input_id[:max_len])
         target_ids.append(target[:max_len])
     input_ids = torch.tensor(input_ids, dtype=torch.int)
+    
+    def print_tensor(tensor):
+        torch.set_printoptions(profile="full")
+        print(tensor)
+        torch.set_printoptions(profile="default")
+
     target_ids = torch.tensor(target_ids, dtype=torch.int)
 
     return dict(
@@ -270,8 +276,7 @@ class LazySupervisedDataset(Dataset):
         prompt = self.question_template.format(
             image_path= f"<img>{image_path}</img>",
             layout=layout,
-            question=question,
-            answer=answer)
+            question=question)
         message = [
             {"role": "system", "content": self.system_message},
             {"role": "user", "content": prompt},

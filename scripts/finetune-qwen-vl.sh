@@ -20,7 +20,7 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --data_path $DATA \
     --fp16 True \
     --fix_vit True \
-    --output_dir output_qwen-vl_sp_qlora \
+    --output_dir /root/autodl-tmp/output_qwen-vl_sp_qlora \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -28,8 +28,8 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --seed 2024 \
-    --save_steps 10 \
-    --save_total_limit 20 \
+    --save_steps 100 \
+    --save_total_limit 50 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \
     --adam_beta2 0.95 \
@@ -43,4 +43,4 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --gradient_checkpointing \
     --use_lora ${USE_LORA} \
     --q_lora ${Q_LORA} \
-    --deepspeed ${DS_CONFIG_PATH}
+    # --deepspeed ${DS_CONFIG_PATH}

@@ -68,8 +68,7 @@ Answer:"""
 """
 
 
-vl_ocr_question_template = """
-The following is a document image and its corresponding string layout of a document picture, including by "```".Please extract the answer from the document layout based on the document image.
+vl_ocr_question_template = """The following is a document image and its corresponding string layout of a document picture, including by "```".Please extract the answer from the document layout based on the document image.
 
 Document Layout Notice:
 In the layout, "*" is used as the placeholder, this meaning the text segment should fill text part and "*" part in document picture.
