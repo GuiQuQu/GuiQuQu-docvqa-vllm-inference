@@ -7,12 +7,16 @@ import json
 import pathlib
 import time
 import argparse
+
+
 from transformers import AutoTokenizer, PreTrainedTokenizer
 from transformers import AutoModelForCausalLM
 from transformers.generation import GenerationConfig
+import peft
 from peft import PeftModel, PeftConfig
 from tqdm import tqdm
 
+from torch import nn
 from torch.utils.data import Dataset,DataLoader
 
 import template
@@ -130,16 +134,19 @@ class EvalSPDocVQADatasetWithImg(Dataset):
             ret.update({"answers": item["answers"]})
         return ret
 
-def load_peft_model(adapter_name_or_path,trust_remote_code=False):
+def load_qwen_vl_lora(adapter_name_or_path):
     """
         加载微调之后的qwen-vl模型
     """
     peft_config = PeftConfig.from_pretrained(adapter_name_or_path,inference_mode=True)
-    model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path,torch_dtype="auto",device_map="auto",trust_remote_code=trust_remote_code)
-    lora_model = PeftModel.from_pretrained(model, adapter_name_or_path,trust_remote_code=trust_remote_code)
+    model:nn.Module = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path,torch_dtype="auto",device_map="auto",trust_remote_code=True)
+    lora_model:peft.peft_model.PeftModelForCausalLM = PeftModel.from_pretrained(model, adapter_name_or_path)
     lora_model.eval()
-    print("Start Merge Adapter...")
-    lora_model.base_model.merge_adapter()
+    print("Start  merge_and_unloadMerge Adapter...")
+    # print(f"lora_model class type is {type(lora_model)}")
+    # print(f"lora_model.base_model type is {type(lora_model.base_model)}") # base_model is LoraModel
+    # gptq 量化的模型不能merge ...
+    # lora_model.base_model.merge_and_unload()
     print(f"{adapter_name_or_path} loaded, dtype is {next(lora_model.parameters()).dtype}")
     for _, p in model.named_parameters():
         p.requires_grad = False
@@ -150,7 +157,7 @@ def load_qwen_vl_model(model_name_or_path):
     """
         可以加载qwen-vl bf16 和 qwen-vl-chat-int4
     """
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map="auto",trust_remote_code=True)
+    model:nn.Module = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map="auto",trust_remote_code=True)
     model.eval()
     model.generation_config = GenerationConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
     model.use_cache = True
@@ -209,10 +216,12 @@ def main(args):
     dataloader = DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=False,collate_fn=collate_fn)
 
     # load model
-    if args.model_name_or_path:
+    if args.model_name_or_path :
         model = load_qwen_vl_model(model_name_or_path)
+    elif args.adapter_name_or_path: 
+        model = load_qwen_vl_lora(model_name_or_path)
     else:
-        model = load_peft_model(model_name_or_path)
+        raise ValueError("Please provide 'model_name_or_path' or 'adapter_name_or_path' for model load")
     
     with open(args.log_path, "a", encoding="utf-8") as f:
         for i, batch in enumerate(tqdm(dataloader)):
@@ -242,21 +251,22 @@ def main(args):
 if __name__ == "__main__":
     data_dir = "/root/autodl-tmp/spdocvqa-dataset"
     project_dir = "/root/GuiQuQu-docvqa-vllm-inference"
+    pretrain_model_dir = "/root/pretrain-model"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--adapter_name_or_path",type=str,default=None)
-    parser.add_argument("--model_name_or_path",type=str,default="/root/pretrain-model/Qwen-VL-Chat-Int4")
+    parser.add_argument("--model_name_or_path",type=str,default=None)
+    parser.add_argument("--adapter_name_or_path",type=str,default="/root/autodl-tmp/output_qwen-vl_sp_qlora/checkpoint-100")
     parser.add_argument("--eval_json_data_path",type=str,default= os.path.join(data_dir,"val_v1.0_withQT.json"))
     parser.add_argument("--data_image_dir", type=str, default=os.path.join(data_dir,"images"))
     parser.add_argument("--data_ocr_dir", type=str, default=os.path.join(data_dir,"ocr"))
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed",type=int,default=2024)
-    parser.add_argument("--few-shot", action="store_true",default=True)
+    parser.add_argument("--few-shot", action="store_true",default=False)
     parser.add_argument("--max_new_tokens", type=int, default=128)
     # parser.add_argument("--max_length", type=int, default=1408)
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     parser.add_argument("--add_image", action="store_true",default=True)
     parser.add_argument("--few_shot_example_json_path",type=str,default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"])
-    parser.add_argument("--log_path",type=str,default="../result/qwen-vl-int4_no-ft_few-shot3-all-star_add-image.jsonl")
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl-int4_sft-vl.jsonl"))
     args = parser.parse_args()
     main(args)

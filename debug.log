@@ -97,3 +97,9 @@ logprobs=None)
 
 
  step4932
+使用原来版本的pormpt,不变的few-shot,增加相应的图像信息,在wen-vl-int4上进行推理得到结果
+0.5662289931089702
+
+lora,qwen-vl-int4,没有few-shot,同时使用图像信息和文本信息,修改prompt变简洁了
+qwen-vl-int4-checkpoint-100
+ 0.7202435624795531
