@@ -256,12 +256,12 @@ def load_qwen_vl_lora(adapter_name_or_path):
     model:nn.Module = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path,torch_dtype="auto",device_map="auto",trust_remote_code=True)
     lora_model:peft.peft_model.PeftModelForCausalLM = PeftModel.from_pretrained(model, adapter_name_or_path)
     lora_model.eval()
-    print("Start  merge_and_unloadMerge Adapter...")
+    # print("Start  merge_and_unload Merge Adapter...")
     # print(f"lora_model class type is {type(lora_model)}")
     # print(f"lora_model.base_model type is {type(lora_model.base_model)}") # base_model is LoraModel
     # gptq 量化的模型不能merge ...
     # lora_model.base_model.merge_and_unload()
-    print(f"{adapter_name_or_path} loaded, dtype is {next(lora_model.parameters()).dtype}")
+    print(f"'{adapter_name_or_path}' loaded, dtype is '{next(lora_model.parameters()).dtype}'")
     for _, p in model.named_parameters():
         p.requires_grad = False
     lora_model.base_model.use_cache = True
@@ -349,7 +349,7 @@ def main(args):
                 p, anss = t
                 _, content_tokens = get_input_ids_for_qwen_vl(p,tokenizer)
                 start_time = time.time()
-                resp, _ = qwen_vl_inference(model, tokenizer, p, args)
+                resp, _ = qwen_vl_inference2(model, tokenizer, p, args)
                 execution_time = time.time() - start_time
                 log = dict(p=f"[{i*args.batch_size+j+1}|{len(eval_dataset)}]",
                             time=f"{execution_time:.2f}s",
@@ -371,10 +371,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path",type=str,default=None)
     parser.add_argument("--adapter_name_or_path",type=str,
-                        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/output_qwen-vl_sp_qlora/checkpoint-300")
+                        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/output_qwen-vl_sp_qlora/checkpoint-200")
     parser.add_argument("--eval_json_data_path",type=str,default= os.path.join(data_dir,"val_v1.0_withQT.json"))
     parser.add_argument("--data_image_dir", type=str, default=os.path.join(data_dir,"images"))
     parser.add_argument("--data_ocr_dir", type=str, default=os.path.join(data_dir,"ocr"))
+    parser.add_argument("--layout_dir",type=str,default=os.path.join(data_dir,"layout"))
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed",type=int,default=2024)
     parser.add_argument("--few-shot", action="store_true",default=False)
@@ -384,6 +385,6 @@ if __name__ == "__main__":
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     parser.add_argument("--add_image", action="store_true",default=True)
     parser.add_argument("--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"])
-    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-300.jsonl"))
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-200.jsonl"))
     args = parser.parse_args()
     main(args)
