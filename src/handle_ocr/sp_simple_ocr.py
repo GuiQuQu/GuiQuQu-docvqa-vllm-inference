@@ -1,7 +1,13 @@
 import json
 import math
 
-
+"""
+    lines : List[Dict] List of text segment
+    text segment : Dict[
+    boundingBox,
+    text,
+    words[Dict[boundingBox,text]]
+"""
 def sp_open_ocr_data(json_path: str):
     with open(json_path, 'r', encoding="utf-8") as f:
         data = json.load(f)
@@ -15,11 +21,11 @@ def sp_open_ocr_data(json_path: str):
 def sp_get_layout(ocr_data: dict, placeholder: str = " ") -> str:
     # step 1. get line for ocr_data
     page_width = ocr_data["width"]
-    page_height = ocr_data["height"]
+    # page_height = ocr_data["height"]
     all_lines = get_lines_from_ocr_data(ocr_data)
     # cnt_star指文档中最大的行字符数量
     cnt_star = 0
-    star_text = ""
+    # star_text = ""
     for line in all_lines:
         for segment in line:
             box = parse_boundingbox(segment["boundingBox"])
@@ -160,10 +166,6 @@ def sp_get_layout_by_json_path(json_path:str, placeholder:str = " "):
     ocr_data = sp_open_ocr_data(json_path)
     return sp_get_layout(ocr_data,placeholder)
 
-def write_log(layout):
-    with open("layout.txt","w",encoding="utf-8") as f:
-        f.write(layout)
-
 def sp_get_baseline_layout_by_json_path(json_path:str):
     """
         baseline 是仅仅将text segment 拼在一起
@@ -184,20 +186,32 @@ def sp_get_lines_layout_by_json_path(json_path:str):
     return "\n".join(all_lines)
 
 
+def save_ocr_result(json_dir,ocr_dir):
+    import os
+    json_files = os.listdir(json_dir)
+    for json_file in json_files:
+        json_path = os.path.join(json_dir,json_file)
+        layout = sp_get_layout_by_json_path(json_path, placeholder="*")
+        ocr_file = json_file.replace(".json",".txt")
+        ocr_path = os.path.join(ocr_dir,ocr_file)
+        with open(ocr_path,"w",encoding="utf-8") as f:
+            f.write(layout)
+        print(f"save {ocr_path} success")
+
 def main():
     # 这两个json文件中没有ocr识别结果
     # /home/klwang/data/SPDocVQA/ocr/jzhd0227_85.json 
     # /home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json
-    json_path = "/home/klwang/data/SPDocVQA/ocr/hpbl0226_5.json"
+    json_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src/handle_ocr/sp/ffbf0023_4.json"
     image_path = "/home/klwang/data/SPDocVQA/images/hpbl0226_5.png"
     layout1 = sp_get_baseline_layout_by_json_path(json_path)
     layout2 = sp_get_lines_layout_by_json_path(json_path)
     layout3 = sp_get_layout_by_json_path(json_path,placeholder="*")
-    write_log(layout3)
+
+    with open("layout.txt","w",encoding="utf-8") as f:
+        f.write(layout3)
     # print(len(layout))
     # print(layout)
-
-
 
 
 if __name__ == "__main__":

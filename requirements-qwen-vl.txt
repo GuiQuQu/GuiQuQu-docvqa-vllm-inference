@@ -15,4 +15,5 @@ deepspeed
 ipywidgets
 ipykernel
 optimum
+auto-gptq
 lmdeploy==0.4.1

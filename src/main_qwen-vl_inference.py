@@ -2,14 +2,14 @@ import os
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-from typing import List,Union
+from typing import List,Union,Dict
 import json
 import pathlib
 import time
 import argparse
 
-
-from transformers import AutoTokenizer, PreTrainedTokenizer
+import torch
+from transformers import AutoTokenizer, PreTrainedTokenizer,PreTrainedModel
 from transformers import AutoModelForCausalLM
 from transformers.generation import GenerationConfig
 import peft
@@ -19,6 +19,8 @@ from tqdm import tqdm
 from torch import nn
 from torch.utils.data import Dataset,DataLoader
 
+from Qwen_VL.tokenization_qwen import QWenTokenizer,ENDOFTEXT
+
 import template
 import utils
 
@@ -26,12 +28,124 @@ question_template = template.star_question_template_with_img
 
 few_shot_template = question_template + "{answer}\n"
 
+def get_prompt(tokenizer:QWenTokenizer, 
+                        messages, 
+                        default_system_message:str = "You are a helpful assistant.",
+                        tokenize:bool = False):
+    """
+    messages: List
+    messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": prompt},
+    {"role": "assistant", "content": response},
+    ]
+    <|im_start|>system\nsystem_message<|im_end|>\n
+    <|im_start|>user\nuser_message<|im_end|>\n
+    <|im_start|>assistant\nresp<|im_end|>\n
+    <|im_start|>user\nuser_message<|im_end|>\n
+    <|im_start|>assistant\n
+    """
+    im_start,  = "<|im_start|>", 
+    im_end,  = "<|im_end|>",
+
+
+    def _msg_prompt(role, content):
+        return f"{im_start}{role}\n{content}{im_end}\n"
+    # 编码prompt
+    assert len(messages) >= 1
+    prompt = ""
+    
+    # add system message
+    if messages[0]["role"] == "system":
+        prompt += _msg_prompt("system",msg["content"])
+        messages = messages[1:]
+    else:
+        prompt += _msg_prompt("system",default_system_message)
+
+    # role loop
+    role_loop =["user", "assistant"]
+    expect_idx = 0
+    for _, msg in enumerate(messages):
+        if msg["role"] != role_loop[expect_idx]:
+            ValueError(f"expect role is {role_loop[expect_idx]}, but actually is {msg['role']}")
+        prompt += _msg_prompt(msg["role"],msg["content"])
+        expect_idx = (expect_idx + 1) % 2
+    if role_loop[expect_idx] != "assistant":
+        ValueError("message last item should is user message")
+    # add assistant resp
+    prompt += f"{im_start}assistant\n"
+    if not tokenize:
+        return prompt
+    im_start_tokens = tokenizer.encode(im_start)
+    im_end_tokens =  tokenizer.encode(im_end)
+    nl_tokens = tokenizer.encode("\n")
+    allowed_special = set(tokenizer.IMAGE_ST)
+    raise NotImplementedError    
+
+def decode_tokens(tokens: List[int],
+           tokenizer:QWenTokenizer,
+           end_token_ids: List[int],
+           prompt_text_len:int,
+           prompt_token_len:int,
+           stop_words: List[str] = [],
+           errors:str = "replace"):
+    """
+        解码genernate产生的输出
+    """
+    end_reason = f"Genernate length {len(tokens)}"
+    eod_token_idx = prompt_token_len
+    response = dict()
+    for eod_token_idx in range(prompt_token_len, len(tokens)):
+        if tokens[eod_token_idx] in end_token_ids:
+            end_reason = f"Gen {tokenizer.decode([tokens[eod_token_idx]])!r}"
+            break
+    trim_decode_text = tokenizer.decode(tokens[:eod_token_idx], errors = errors)[prompt_text_len:]
+    response["raw_generate_w/o_EOD"] = tokenizer.decode(tokens,errors=errors)[prompt_text_len:]
+    response["raw_generate"] = trim_decode_text
+    response["end_reason"] = end_reason
+    # 删除停止词
+    # for stop_word in stop_words:
+    #     trim_decode_text = trim_decode_text.replace(stop_word,"").strip()
+    response["response"] = trim_decode_text
+    return response
+
 def get_input_ids_for_qwen_vl(prompt: str,tokenizer):
     from Qwen_VL.qwen_generation_utils import make_context
     raw_text, content_tokens  = make_context(tokenizer,prompt,history=None, system="You are a helpful assistant.",chat_format="chatml")
     return raw_text, content_tokens
 
-def qwen_vl_inference(model,tokenizer, prompt:Union[List[str],str], args) -> List[str]:
+def qwen_vl_inference(model:PreTrainedModel, 
+                      tokenizer:QWenTokenizer, 
+                      prompts:List[List[Dict]],args):
+    if not isinstance(prompts,list):
+        prompts = [prompts]
+        need_warpped = True
+    prompts = [get_prompt(tokenizer,p) for p in prompts]
+    device = next(model.parameters()).device
+    model_inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True,max_length=args.max_length).to(device)
+    # 停止输出词
+    stop_words_ids = [[tokenizer.im_end_id],[tokenizer.im_start_id]]
+    generate_ids = model.generate(
+        model_inputs.input_ids,
+        stop_words_ids=stop_words_ids,
+        attention_mask = model_inputs.attention_mask,
+        generation_config=model.generation_config,
+        max_new_tokens=args.max_new_tokens)
+
+    responses = []
+    for p,input_ids, output_ids in zip(prompts,model_inputs.input_ids,generate_ids):
+        resp = decode_tokens(output_ids, 
+                             prompt_text_len=len(p),
+                             prompt_token_len=len(input_ids),
+                             end_token_ids=[tokenizer.im_start_id,tokenizer.im_end_id],
+                             tokenizer=tokenizer)
+        responses.append(resp)
+    if need_warpped:
+        return responses[0]
+    else:
+        return responses
+
+def qwen_vl_inference2(model,tokenizer, prompt:Union[List[str],str], args) -> List[str]:
     """
         仅支持调用模型chat方法一条一条推理
     """
@@ -178,7 +292,9 @@ def main(args):
     
     utils.seed_everything(args.seed)
     
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side='left',trust_remote_code=True)
+    tokenizer:QWenTokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side='left',trust_remote_code=True)
+    tokenizer.pad_token_id = tokenizer.eod_id
+    tokenizer.eos_token_id = tokenizer.eod_id
     few_shot_examples = []
     layout_func = utils.get_layout_func(args.layout_type)
 
@@ -249,24 +365,25 @@ def main(args):
                 f.write(log_str + "\n")
     
 if __name__ == "__main__":
-    data_dir = "/root/autodl-tmp/spdocvqa-dataset"
-    project_dir = "/root/GuiQuQu-docvqa-vllm-inference"
-    pretrain_model_dir = "/root/pretrain-model"
+    data_dir = "/home/klwang/data/spdocvqa-dataset"
+    project_dir = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference"
+    pretrain_model_dir = "/home/klwang/pretrain-model"
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path",type=str,default=None)
-    parser.add_argument("--adapter_name_or_path",type=str,default="/root/autodl-tmp/output_qwen-vl_sp_qlora/checkpoint-100")
+    parser.add_argument("--adapter_name_or_path",type=str,
+                        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/output_qwen-vl_sp_qlora/checkpoint-300")
     parser.add_argument("--eval_json_data_path",type=str,default= os.path.join(data_dir,"val_v1.0_withQT.json"))
     parser.add_argument("--data_image_dir", type=str, default=os.path.join(data_dir,"images"))
     parser.add_argument("--data_ocr_dir", type=str, default=os.path.join(data_dir,"ocr"))
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed",type=int,default=2024)
     parser.add_argument("--few-shot", action="store_true",default=False)
+    parser.add_argument("--few_shot_example_json_path",type=str,default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--max_new_tokens", type=int, default=128)
     # parser.add_argument("--max_length", type=int, default=1408)
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     parser.add_argument("--add_image", action="store_true",default=True)
-    parser.add_argument("--few_shot_example_json_path",type=str,default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"])
-    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl-int4_sft-vl.jsonl"))
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-300.jsonl"))
     args = parser.parse_args()
     main(args)

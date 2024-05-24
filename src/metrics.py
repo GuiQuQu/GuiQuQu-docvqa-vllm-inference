@@ -3,7 +3,8 @@
 """
 from typing import List
 import Levenshtein
-
+import os
+import json
 
 def anls(predict_answer: List[str], ground_truth: List[List[str]], threshold=0.5) -> float:
     """
@@ -36,3 +37,48 @@ def similarity(answer_ij: str, predict_i: str, threshold: float = 0.5) -> float:
         nl_score = float(edit_dist) / float(maxlen)
 
     return 1-nl_score if nl_score < threshold else 0.0
+
+# borrow from 'https://github.com/WenjinW/LATIN-Prompt/blob/main/metric/anls.py'
+class ANLS(object):
+    def __init__(self,
+                 result_dir,
+                 exp_name,
+                 dataset_name) -> None:
+        super().__init__()
+        self.result_dir = result_dir
+        self.exp_name = exp_name
+        self.dataset_name = dataset_name
+    
+    def _ls(self, s1,s2, threshold=0.5):
+        s1 = s1.lower().strip()
+        s2 = s2.lower().strip()
+        nls = Levenshtein.distance(s1, s2) / max(len(s1), len(s2))
+        return 1-nls if nls < threshold else 0.0
+
+    def _ls_multiple(self, pred, answers:List[str],threshold=0.5):
+        return max([self._ls(pred, ans, threshold) for ans in answers])
+    
+    def compute_and_save_docvqa(self,qids:List[int],
+                                questions:List[str], predictions:List[str],
+                                  answers:List[List[str]]=None, split="val"):
+        """
+            保存计算结果,如果answers不为None,则计算anls
+        """
+        all_anls = 0.0
+        results = []
+        for i in range(len(qids)):
+            result = {
+                "questionId": qids[i],
+                "answer": predictions[i]
+            }
+            if answers is not None:
+                anls = self._ls_multiple(predictions[i], answers[i])
+                all_anls += anls
+                result["question"] = questions[i]
+                result["answer"] = answers[i]
+                result["anls"] = anls
+            results.append(result)
+        save_path = os.path.join(self.result_dir, f"{self.exp_name}_{self.dataset_name}_{split}.json")
+        with open(save_path,"w",encoding="utf-8") as f:
+            json.dump(results,f,ensure_ascii=False,indent=2)
+        return all_anls / len(qids)

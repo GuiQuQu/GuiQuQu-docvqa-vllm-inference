@@ -1,5 +1,5 @@
 # 一键解压mpdocvqa数据
-DATA_DIR="/root/autodl-tmp/spdocvqa-dataset"
+DATA_DIR="/home/klwang/data/spdocvqa-dataset"
 # DATA_DIR="/root/autodl-tmp/data"
 
 QAS_ZIP_FILE="spdocvqa_qas.zip"
