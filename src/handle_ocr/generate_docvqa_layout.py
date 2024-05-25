@@ -1,8 +1,8 @@
 import os
 from tqdm import tqdm
-from sp_ocr import sp_layout_from_json_path
+from sp_ocr import sp_layout_star_from_json_path
 
-def generate_docvqa_layout(ocr_dir, layout_dir,placeholder="*"):
+def generate_docvqa_layout(ocr_dir, layout_dir):
     """
     generate docvqa layout from ocr data,save to layout_dir
     """
@@ -11,7 +11,7 @@ def generate_docvqa_layout(ocr_dir, layout_dir,placeholder="*"):
     for file in tqdm(os.listdir(ocr_dir)):
         if file.endswith(".json"):
             json_path = os.path.join(ocr_dir, file)
-            layout = sp_layout_from_json_path(json_path, placeholder)
+            layout = sp_layout_star_from_json_path(json_path)
             layout_path = os.path.join(layout_dir, file.replace(".json", ".txt"))
             with open(layout_path, "w", encoding="utf-8") as f:
                 f.write(layout)

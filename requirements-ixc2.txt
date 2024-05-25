@@ -1,0 +1,13 @@
+torch==2.1.2
+transformers==4.33.1
+sentencepiece
+peft
+pillow
+torchvision
+accelerate
+einops
+deepspeed
+python-Levenshtein==0.12.2
+ipywidgets
+ipykernel
+flash-atttn

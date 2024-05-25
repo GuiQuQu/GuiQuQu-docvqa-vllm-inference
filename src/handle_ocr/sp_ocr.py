@@ -81,7 +81,42 @@ def _split_line_from_data(data:List[dict]):
     result = [sorted(line,key=lambda x:x['bbox'].left) for line in result]
     return result
 
-def _sp_layout(data, placeholder:str):
+def _sp_layout_no_placeholder(data):
+    """
+        from 'Layout and Task Aware Instruction Prompt for Zero-shot Document Image Question Answering'
+        self implemention
+    """
+    max_line_char_cnt = 0 # 字符数最多的一行
+    max_line_width = 0 # 该行对应的宽度
+    document = data['lines']
+    for line in document:
+        line_char_cnt = 0
+        line_text_width = 0.0
+        for seg in line:
+            line_char_cnt += len(seg['text'])
+            line_text_width += seg['bbox'].width
+        if max_line_char_cnt < line_char_cnt:
+            max_line_char_cnt = line_char_cnt
+            max_line_width = line_text_width
+    document_lines = [] 
+    for line in document:
+        line_str = ""
+        for i,seg in enumerate(line):
+            text:str = seg['text']
+            bbox:BBox = seg['bbox']
+            if i == 0:
+                line_str += text
+            else:
+                space_cnt = math.ceil((bbox.left - line[i-1]['bbox'].right) / max_line_width * max_line_char_cnt)
+                line_str = line_str + " " * space_cnt + text
+        document_lines.append(line_str)
+    if len(document_lines) == 0: return ""
+    document_str = "\n".join(document_lines)
+    return document_str
+
+
+def _sp_layout_star(data):
+    placeholder = "*"
     max_line_char_cnt = 0
     page_width = data['page_width']
     document = data['lines']
@@ -124,11 +159,15 @@ def _sp_layout(data, placeholder:str):
     document_str = "\n".join(document_lines)
     return document_str 
 
-
-def sp_layout_from_json_path(json_path:str, placeholder:str):
+def sp_layout_no_placeholder_from_json_path(json_path:str):
     data = sp_open_ocr_data(json_path)
     data["lines"] = _split_line_from_data(data["segments"])
-    return _sp_layout(data,placeholder)
+    return _sp_layout_no_placeholder(data)
+
+def sp_layout_star_from_json_path(json_path:str):
+    data = sp_open_ocr_data(json_path)
+    data["lines"] = _split_line_from_data(data["segments"])
+    return _sp_layout_star(data)
 
 def sp_layout_no_handle_from_json_path(json_path:str):
     data = sp_open_ocr_data(json_path)
@@ -143,7 +182,7 @@ def sp_layout_split_lines_from_json_path(json_path:str):
     document_str = " ".join(document)
     return document_str
 
-def generate_docvqa_layout(ocr_dir, layout_dir,placeholder="*"):
+def generate_docvqa_layout(ocr_dir, layout_dir):
     """
     generate docvqa layout from ocr data,save to layout_dir
     """
@@ -152,17 +191,26 @@ def generate_docvqa_layout(ocr_dir, layout_dir,placeholder="*"):
     for file in os.listdir(ocr_dir):
         if file.endswith(".json"):
             json_path = os.path.join(ocr_dir, file)
-            layout = sp_layout_from_json_path(json_path, placeholder)
+            layout = sp_layout_star_from_json_path(json_path)
             layout_path = os.path.join(layout_dir, file.replace(".json", ".txt"))
             with open(layout_path, "w", encoding="utf-8") as f:
                 f.write(layout)
 
+def test_star_layout():
+    json_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src/handle_ocr/sp/jmlh0227_8.json"
+    sp_layout = sp_layout_star_from_json_path(json_path)
+    with open("layout_sp_star_.txt", "w", encoding="utf-8") as f:
+        f.write(sp_layout)
+
+def test_no_placeholder_layout():
+    json_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src/handle_ocr/sp/jmlh0227_8.json"
+    sp_layout = sp_layout_no_placeholder_from_json_path(json_path)
+    with open("layout_sp_np.txt", "w", encoding="utf-8") as f:
+        f.write(sp_layout)
 
 def main():
-    json_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src/handle_ocr/sp/ffbf0023_4.json"
-    sp_layout = sp_layout_from_json_path(json_path, "*")
-    with open("layout_new_sp.txt", "w", encoding="utf-8") as f:
-        f.write(sp_layout)
+    test_no_placeholder_layout()
+    test_star_layout()
 
 if __name__ == "__main__":
     main()

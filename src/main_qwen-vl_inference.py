@@ -95,15 +95,17 @@ def decode_tokens(tokens: List[int],
     end_reason = f"Genernate length {len(tokens)}"
     eod_token_idx = prompt_token_len
     response = dict()
+    
     for eod_token_idx in range(prompt_token_len, len(tokens)):
         if tokens[eod_token_idx] in end_token_ids:
-            end_reason = f"Gen {tokenizer.decode([tokens[eod_token_idx]])!r}"
+            end_reason = f"Genernate {tokenizer.decode([tokens[eod_token_idx]])!r}"
             break
+    
     trim_decode_text = tokenizer.decode(tokens[:eod_token_idx], errors = errors)[prompt_text_len:]
-    response["raw_generate_w/o_EOD"] = tokenizer.decode(tokens,errors=errors)[prompt_text_len:]
-    response["raw_generate"] = trim_decode_text
+    # response["raw_generate_w/o_EOD"] = tokenizer.decode(tokens,errors=errors)[prompt_text_len:]
+    # response["raw_generate"] = trim_decode_text
     response["end_reason"] = end_reason
-    # 删除停止词
+    # 删除停止词 
     # for stop_word in stop_words:
     #     trim_decode_text = trim_decode_text.replace(stop_word,"").strip()
     response["response"] = trim_decode_text
@@ -114,9 +116,11 @@ def get_input_ids_for_qwen_vl(prompt: str,tokenizer):
     raw_text, content_tokens  = make_context(tokenizer,prompt,history=None, system="You are a helpful assistant.",chat_format="chatml")
     return raw_text, content_tokens
 
+
+
 def qwen_vl_inference(model:PreTrainedModel, 
                       tokenizer:QWenTokenizer, 
-                      prompts:List[List[Dict]],args):
+                      prompts:List[List[Dict]],args) -> utils.Response | List[utils.Response]:
     if not isinstance(prompts,list):
         prompts = [prompts]
         need_warpped = True
@@ -133,13 +137,22 @@ def qwen_vl_inference(model:PreTrainedModel,
         max_new_tokens=args.max_new_tokens)
 
     responses = []
-    for p,input_ids, output_ids in zip(prompts,model_inputs.input_ids,generate_ids):
-        resp = decode_tokens(output_ids, 
+    for p,input_ids, output_ids in zip(prompts,model_inputs.input_ids, generate_ids):
+        input_ids:List[int] = input_ids.cpu().numpy().tolist()
+        output_ids:List[int] = output_ids.cpu().numpy().tolist()
+        resp = decode_tokens(output_ids,
                              prompt_text_len=len(p),
                              prompt_token_len=len(input_ids),
                              end_token_ids=[tokenizer.im_start_id,tokenizer.im_end_id],
                              tokenizer=tokenizer)
-        responses.append(resp)
+        
+        responses.append(utils.Response(
+            text=resp["response"],
+            prompt=p,
+            end_reason=resp["end_reason"],
+            input_ids=input_ids,
+            output_ids=output_ids[len(input_ids):],
+        ))
     if need_warpped:
         return responses[0]
     else:
@@ -237,6 +250,10 @@ class EvalSPDocVQADatasetWithImg(Dataset):
             prompt += self._format_few_shot_prompt(e["layout"], e["question"], e["answer"],image_path)
         # add question
         prompt = self._format_prompt(layout,question,image_path)
+        prompt = [{
+            "role": "user",
+            "content": prompt
+        }]
         ret = dict(
             prompt=prompt,
             question=question,
@@ -296,7 +313,8 @@ def main(args):
     tokenizer.pad_token_id = tokenizer.eod_id
     tokenizer.eos_token_id = tokenizer.eod_id
     few_shot_examples = []
-    layout_func = utils.get_layout_func(args.layout_type)
+    # layout_func = utils.get_layout_func(args.layout_type)
+    layout_func = utils.sp_get_layout_func2(args.layout_type)
 
     if args.few_shot:
         few_shot_examples = utils.open_json(args.few_shot_example_json_path)
@@ -338,15 +356,31 @@ def main(args):
         model = load_qwen_vl_lora(model_name_or_path)
     else:
         raise ValueError("Please provide 'model_name_or_path' or 'adapter_name_or_path' for model load")
-    
+    bsz = args.batch_size
     with open(args.log_path, "a", encoding="utf-8") as f:
         for i, batch in enumerate(tqdm(dataloader)):
-            prompt:List[str] = batch["prompt"]
+            prompt:List[List[Dict]] = batch["prompt"]
             answers:List[List[str]] = batch["answers"]
-            # 目前的问题,因为qwen-vl没有提供长度截断的方法,因此目前是一条一条推理且不进行长度截断的
-            # 目前仅仅依靠truncate_layout()来进行过长截断
+
+            # responses:List[utils.Response] = qwen_vl_inference(model,tokenizer,prompt,args)
+
+            # for j, resp in enumerate(responses):
+            #     log = dict(p=f"[{i * bsz + j + 1}|{len(eval_dataset)}]",
+            #                 prompt=resp.prompt,
+            #                 response=resp.text,
+            #                 end_reason=resp.end_reason,
+            #                 image_path=batch["image_path"][j],
+            #                 ocr_path=batch["ocr_path"][j],
+            #                 question=batch["question"][j],
+            #                 answers=answers[j])
+            #     log_str = json.dumps(log, ensure_ascii=False)
+            #     tqdm.write(log_str)
+            #     f.write(log_str + "\n")
+
+
             for j,t in enumerate(zip(prompt,answers)):
                 p, anss = t
+                p = p[-1]['content']
                 _, content_tokens = get_input_ids_for_qwen_vl(p,tokenizer)
                 start_time = time.time()
                 resp, _ = qwen_vl_inference2(model, tokenizer, p, args)
@@ -381,10 +415,10 @@ if __name__ == "__main__":
     parser.add_argument("--few-shot", action="store_true",default=False)
     parser.add_argument("--few_shot_example_json_path",type=str,default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--max_new_tokens", type=int, default=128)
-    # parser.add_argument("--max_length", type=int, default=1408)
+    parser.add_argument("--max_length", type=int, default=1408)
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     parser.add_argument("--add_image", action="store_true",default=True)
     parser.add_argument("--layout_type", type=str, default="all-star" ,choices=["all-star","lines","words"])
-    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-200.jsonl"))
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl/debug-qwen-vl-int4_sft-vl-checkpoint-200.jsonl"))
     args = parser.parse_args()
     main(args)

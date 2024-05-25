@@ -16,8 +16,7 @@ src/handle_ocr/*.txt
 src/handle_ocr/*.jpg
 src/handle_ocr/*.png
 **/log.jsonl
-/tmp.py
-/tmp.txt
+**/tmp*
 /*.jsonl
 /*.json
 /SimSun.ttf

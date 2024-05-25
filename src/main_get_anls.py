@@ -5,7 +5,7 @@ from metrics import anls
 
 def main():
     # 0.73.89
-    result_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-100.jsonl"
+    result_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/result/qwen-vl/qwen-vl-int4_sft-vl-checkpoint-300.jsonl"
     reponses = []
     gts = []
     with open(result_path,"r",encoding="utf-8") as f:
