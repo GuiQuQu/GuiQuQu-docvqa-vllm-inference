@@ -8,7 +8,6 @@ import numpy as np
 import torch
 
 import handle_ocr
-import handle_ocr.sp
 
 def truncate_layout(layout:str, 
                     tokenizer:PreTrainedTokenizer = None, 
