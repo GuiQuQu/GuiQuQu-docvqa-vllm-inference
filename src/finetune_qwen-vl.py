@@ -43,7 +43,13 @@ class DataArguments:
     )
     layout_type: str = field(
         default="all-star",
-        metadata={"help": "Layout type for the OCR data. Options: all-star, lines, words."},
+        metadata={"help": "Layout type for the OCR data. Options: all-star, lines, words, none."},
+    )
+    add_layout: bool = field(
+        default=False, metadata={"help": "Whether to add layout information to the prompt."}
+    )
+    add_image: bool = field(
+        default=True, metadata={"help": "Whether to add image information to the prompt."}
     )
     lazy_preprocess: bool = True
     max_doc_token_length: int = 1024
@@ -244,6 +250,8 @@ class LazySupervisedDataset(Dataset):
                 question_template: str,
                 tokenizer: transformers.PreTrainedTokenizer, 
                 max_len: int,
+                add_layout: bool = True,
+                add_image: bool = True,
                 max_doc_token_length: int = 1024):
         """
             raw_data: list of dict,是直接获取的json数据
@@ -260,23 +268,47 @@ class LazySupervisedDataset(Dataset):
         self.layout_func = layout_func
         self.ocr_dir = ocr_dir
         self.image_dir = image_dir
-        self.question_template = question_template
         self.max_doc_token_length = max_doc_token_length
+        # config
+        self.add_layout = add_layout
+        self.add_image = add_image
+        self.question_template = question_template
+        
 
     def __len__(self):
         return len(self.raw_data)
 
+    def _prepare_prompt(self,question,image_path = None, layout= None):
+        """
+            根据是否添加layout和image来准备prompt
+        """
+        if self.add_image and self.add_layout:
+            return self.question_template.format(
+                image_path= f"<img>{image_path}</img>",
+                layout=layout,
+                question=question)
+        elif self.add_image and not self.add_layout:
+            return self.question_template.format(
+                image_path= f"<img>{image_path}</img>",
+                question=question)
+        elif self.add_layout and not self.add_image:
+            return self.question_template.format(
+                layout=layout,
+                question=question)
+        else:
+            return question
+        
     def prepare_sft_data(self, item):
         question = item["question"]
         answer = random.choice(item["answers"])
         ocr_path = os.path.join(self.ocr_dir, item["image"].split("/")[-1].split(".")[0] + ".json")
         image_path = os.path.join(self.image_dir, item["image"].split("/")[-1])
-        layout = self.layout_func(json_path=ocr_path)
-        layout = utils.truncate_layout(layout, self.tokenizer, self.max_doc_token_length) 
-        prompt = self.question_template.format(
-            image_path= f"<img>{image_path}</img>",
-            layout=layout,
-            question=question)
+        layout = None
+        if self.add_layout:
+            layout = self.layout_func(json_path=ocr_path)
+            layout = utils.truncate_layout(layout, self.tokenizer, self.max_doc_token_length)
+        prompt = self._prepare_prompt(question, image_path, layout)
+        # print(json.dumps({'qid':item['questionId'], 'prompt':prompt}))
         message = [
             {"role": "system", "content": self.system_message},
             {"role": "user", "content": prompt},
@@ -288,7 +320,12 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.prepare_sft_data(self.raw_data[i])], self.tokenizer, self.max_len)
+        message = self.prepare_sft_data(self.raw_data[i])
+        ret = preprocess([message], self.tokenizer, self.max_len)
+        # print(self.raw_data[i]['questionId'])
+        # print(message)
+        # print(str(ret['input_ids'][0].cpu().numpy().tolist()))
+        # print(str(ret['labels'][0].cpu().numpy().tolist()))
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -310,14 +347,26 @@ def make_supervised_data_module(
     )
     rank0_print("Loading data...")
 
+    def get_template(data_args):
+        if data_args.add_layout and data_args.add_image:
+            return template.vl_ocr_question_template
+        elif data_args.add_layout and not data_args.add_image:
+            return template.star_question_templatev4
+        elif not data_args.add_layout and data_args.add_image:
+            return template.visual_question_template
+        else:
+            return ValueError("add_layout and add_image cannot be both False")
+
     train_data = utils.load_data(data_args.data_path)
     train_dataset = dataset_cls(train_data, 
                                 ocr_dir=data_args.ocr_dir,
                                 image_dir=data_args.image_dir,
                                 layout_func=utils.get_layout_func(data_args.layout_type),
-                                question_template=template.vl_ocr_question_template,
+                                question_template=get_template(data_args),
                                 tokenizer=tokenizer, 
                                 max_len=max_len,
+                                add_layout=data_args.add_layout,
+                                add_image=data_args.add_image,
                                 max_doc_token_length=data_args.max_doc_token_length)
 
     if data_args.eval_data_path:

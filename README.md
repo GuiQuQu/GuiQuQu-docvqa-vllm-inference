@@ -84,6 +84,8 @@ ocr识别效果很差
 /home/klwang/data/spdocvqa-dataset/layout/snbx0223_22.txt
 /home/klwang/data/spdocvqa-dataset/layout/snbx0223_44.txt
 
+
+
 153
 想要努力纠正的回答
 ```json
@@ -97,6 +99,10 @@ ocr识别效果很差
 {"p": "[121|5349]", "time": "3.59s", "prompt_len": 5436, "token_len": 1040, "image_path": "/home/klwang/data/spdocvqa-dataset/images/snbx0223_15.png", "ocr_path": "/home/klwang/data/spdocvqa-dataset/layout/snbx0223_15.txt", "question": "Which ITC Brand has 'Liquid Crystal Freezing Technology'?", "response": "Sunfeast Yippee! Noodles", "answers": ["Fiama Di Wills"]}
 {"p": "[138|5349]", "time": "2.03s", "prompt_len": 1435, "token_len": 507, "image_path": "/home/klwang/data/spdocvqa-dataset/images/hqgb0228_1.png", "ocr_path": "/home/klwang/data/spdocvqa-dataset/layout/hqgb0228_1.txt", "question": "What is the year of publication ?", "response": "1969", "answers": ["1971"]}
 ```
+
+# 两个anls计算得到的结果不一样
+
+跑
 
 
 

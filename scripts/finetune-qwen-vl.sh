@@ -1,12 +1,15 @@
 #!/bin/bash
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-PROJECT_DIR="/root/GuiQuQu-docvqa-vllm-inference"
+PROJECT_DIR="/home/klwang/code/GuiQuQu-docvqa-vllm-inference"
 cd $PROJECT_DIR
 
-MODEL="/root/pretrain-model/Qwen-VL-Chat-Int4" # Qwen/Qwen-VL-Chat-Int4 Set the path if you do not want to load from huggingface directly
+MODEL="/home/klwang/pretrain-model/Qwen-VL-Chat-Int4" # Qwen/Qwen-VL-Chat-Int4 Set the path if you do not want to load from huggingface directly
 # ATTENTION: specify the path to your training data, which should be a json file consisting of a list of conversations.
 # See the section for finetuning in README for more information.
-DATA="/root/autodl-tmp/spdocvqa-dataset/train_v1.0_withQT.json"
+DATA_DIR="/home/klwang/data/spdocvqa-dataset"
+DATA="$DATA_DIR/train_v1.0_withQT.json"
+OCR_DIR="$DATA_DIR/ocr"
+IMAGE_DIR="$DATA_DIR/images"
 DS_CONFIG_PATH="${PROJECT_DIR}/ds_config/ds_config_zero2.json"
 USE_LORA=True
 Q_LORA=True
@@ -18,9 +21,14 @@ export CUDA_VISIBLE_DEVICES=0
 python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --model_name_or_path $MODEL \
     --data_path $DATA \
+    --ocr_dir $OCR_DIR \
+    --image_dir $IMAGE_DIR \
+    --layout_type "none" \
+    --add_image True \
+    --add_layout False \
     --fp16 True \
     --fix_vit True \
-    --output_dir /root/autodl-tmp/output_qwen-vl_sp_qlora \
+    --output_dir $PROJECT_DIR/output_qwen-vl_sp_qlora_only_image \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -36,7 +44,7 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --warmup_ratio 0.01 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
-    --report_to "none" \
+    --report_to "tensorboard" \
     --model_max_length 2048 \
     --max_doc_token_length 1024 \
     --lazy_preprocess True \

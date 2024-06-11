@@ -1,6 +1,6 @@
 
 from functools import partial
-from typing import List
+from typing import List,Tuple
 from transformers import PreTrainedTokenizer
 import json
 import random
@@ -11,19 +11,49 @@ import handle_ocr
 
 def truncate_layout(layout:str, 
                     tokenizer:PreTrainedTokenizer = None, 
-                    max_token_length:int = 1024):
+                    max_token_length:int = 1024) -> str:
+    """
+        truncate layout to fit the max_token_length
+        another version of truncate_layout2, return truncated layout and is_truncated(True or False)
+    """
     if tokenizer == None:
         return layout
     lines = layout.split("\n")
     lines_input_ids = [tokenizer([l], return_tensors="pt").input_ids for l in lines]
     reserved_lines = []
     ids_cnt = 0
+    is_truncated = False
     for i, input_ids in enumerate(lines_input_ids):
         if ids_cnt + input_ids.size(-1) < max_token_length:
             ids_cnt += input_ids.size(-1)
             reserved_lines.append(lines[i])
-        else: break
+        else: 
+            is_truncated = True
+            break
     return "\n".join(reserved_lines)
+
+def truncate_layout2(layout:str, 
+                    tokenizer:PreTrainedTokenizer = None, 
+                    max_token_length:int = 1024) -> Tuple[str, bool]:
+    """
+        truncate layout to fit the max_token_length
+        return truncated layout and is_truncated(True or False)
+    """
+    if tokenizer == None:
+        return layout
+    lines = layout.split("\n")
+    lines_input_ids = [tokenizer([l], return_tensors="pt").input_ids for l in lines]
+    reserved_lines = []
+    ids_cnt = 0
+    is_truncated = False
+    for i, input_ids in enumerate(lines_input_ids):
+        if ids_cnt + input_ids.size(-1) < max_token_length:
+            ids_cnt += input_ids.size(-1)
+            reserved_lines.append(lines[i])
+        else: 
+            is_truncated = True
+            break
+    return "\n".join(reserved_lines), is_truncated
 
 
 def open_json(json_path: str):
@@ -37,6 +67,7 @@ def open_json(json_path: str):
 def load_data(json_path: str):
     """
         打开json文件,并返回其中的data字段value内容
+        适用于spdocvqa的数据加载
     """
     data = open_json(json_path)
     return data["data"]
@@ -63,6 +94,8 @@ def get_layout_func(type:str):
         return handle_ocr.sp_get_lines_layout_by_json_path
     elif type == "words":
         return handle_ocr.sp_get_baseline_layout_by_json_path
+    elif type == "none":
+        return None
     else:
         raise ValueError("Not support layout pattern")
 

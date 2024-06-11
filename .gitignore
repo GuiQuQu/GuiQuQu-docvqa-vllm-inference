@@ -23,3 +23,5 @@ src/handle_ocr/*.png
 **/SimSun.ttf
 /test.jpg
 /tiger.jpeg
+/x.txt
+/images.txt
