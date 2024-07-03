@@ -119,4 +119,22 @@ Next:
 
 2024-07-03
 使用新的prompt训练docvqa并评测
+新的prompt
+
+```python
+vl_inference_template = """
+You are asked to answer questions based on the given document image and its corresponding string layout. The layout and image is included by "```".
+The answers to questions are short text spans token verbatim from the layout or image.This means answers comprise a set of contiguous text tokens present in the layout or image.
+Document Picture:
+\```
+{image_path}
+\```
+Document:
+\```
+{layout}
+\```
+Question: {question}
+Directly extrct the answer of the question from the document layout and image with as few words as possible.
+Answer:"""
+```
 

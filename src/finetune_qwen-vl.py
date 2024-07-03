@@ -30,7 +30,8 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     data_path: str = field(
-        default="/root/autodl-tmp/spdocvqa-dataset/train_v1.0_withQT.json", metadata={"help": "Path to the training data."}
+        default="/root/autodl-tmp/spdocvqa-dataset/train_v1.0_withQT.json", 
+        metadata={"help": "Path to the training data."}
     )
     eval_data_path: str = field(
         default=None, metadata={"help": "Path to the evaluation data."}
@@ -349,7 +350,8 @@ def make_supervised_data_module(
 
     def get_template(data_args):
         if data_args.add_layout and data_args.add_image:
-            return template.vl_ocr_question_template
+            # return template.vl_ocr_question_template
+            return template.vl_inference_template
         elif data_args.add_layout and not data_args.add_image:
             return template.star_question_templatev4
         elif not data_args.add_layout and data_args.add_image:
