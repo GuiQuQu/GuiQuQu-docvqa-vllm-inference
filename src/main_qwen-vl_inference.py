@@ -171,7 +171,7 @@ def qwen_vl_inference2(model,tokenizer, prompt:Union[List[str],str], args) -> Li
         prompt = [prompt]
         return_unwarped_res = True
     for p in prompt:
-        resp = model.chat(tokenizer, 
+        resp, _ = model.chat(tokenizer, 
                    p,
                    history=None, 
                    append_history=False,
@@ -416,10 +416,10 @@ def main(args):
         model = load_qwen_vl_lora(model_name_or_path)
     else:
         raise ValueError("Please provide 'model_name_or_path' or 'adapter_name_or_path' for model load")
-    experiment_name = f"{args.experiment_name}_{args.adapter_name_or_path.split('/')[-1]}"
+    # experiment_name = f"{args.experiment_name}_{args.adapter_name_or_path.split('/')[-1]}"
     anls = metrics.ANLS(
         result_dir=args.log_dir,
-        experiment_name=experiment_name,
+        experiment_name=args.experiment_name,
         dataset_name="spdocvqa"
     )
     qids,questions, predictions = [], [], []
@@ -476,7 +476,7 @@ def main(args):
         layout_paths=layout_paths,
         split="val"
     )
-    print(f"{experiment_name} spdocvqa val ANLS score is {score:.4f}")
+    print(f"{args.experiment_name} spdocvqa val ANLS score is {score:.4f}")
 
 
 if __name__ == "__main__":
@@ -484,9 +484,9 @@ if __name__ == "__main__":
     project_dir = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference"
     pretrain_model_dir = "/home/klwang/pretrain-model"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path",type=str,default=None)
+    parser.add_argument("--model_name_or_path",type=str,default="/home/klwang/pretrain-model/Qwen-VL-Chat-Int4")
     parser.add_argument("--adapter_name_or_path",type=str,
-                        default="/home/klwang/code/GuiQuQu-docvqa-vllm-inference/output_qwen-vl_sp_qlora_only_image/checkpoint-100")
+                        default=None)
     parser.add_argument("--eval_json_data_path",type=str,default= os.path.join(data_dir,"val_v1.0_withQT.json"))
     parser.add_argument("--data_image_dir", type=str, default=os.path.join(data_dir,"images"))
     parser.add_argument("--add_image", action="store_true",default=True)
@@ -503,8 +503,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     # new anls log
     parser.add_argument("--log_dir", type=str, default=os.path.join(project_dir,"result/qwen-vl_only-inference"))
-    parser.add_argument("--experiment_name", type=str, default="qwen-vl-int4_no-sft-few-shot_vl_''")
+    parser.add_argument("--experiment_name", type=str, default="qwen-vl-int4_zero-shot_only-image_'visual_question_template'")
     # old log
-    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl_only-image_old/qwen-vl-int4_sft_only-image_checkpoint-100.jsonl"))
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl_only-inference/qwen-vl-int4_zero-shot_only-image_'visual_question_template'.jsonl"))
     args = parser.parse_args()
     main(args)

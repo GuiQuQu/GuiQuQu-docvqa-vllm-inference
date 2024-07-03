@@ -62,7 +62,7 @@ def _split_line_from_data(data:List[dict]):
     """
     result = []
     for i, seg in enumerate(data):
-        if i == 0: 
+        if i == 0:
             result.append([seg])
         else:
             # test cur segment with every line last segment, 
@@ -115,8 +115,7 @@ def _sp_layout_no_placeholder(data):
     return document_str
 
 
-def _sp_layout_star(data):
-    placeholder = "*"
+def _sp_layout_with_placeholder(data,placeholder = '*'):
     max_line_char_cnt = 0
     page_width = data['page_width']
     document = data['lines']
@@ -160,23 +159,33 @@ def _sp_layout_star(data):
     return document_str 
 
 def sp_layout_no_placeholder_from_json_path(json_path:str):
+    "From LATIN-Prompt"
     data = sp_open_ocr_data(json_path)
     data["lines"] = _split_line_from_data(data["segments"])
     return _sp_layout_no_placeholder(data)
 
 def sp_layout_star_from_json_path(json_path:str):
+    "Layout Text, placeholder is *"
     data = sp_open_ocr_data(json_path)
     data["lines"] = _split_line_from_data(data["segments"])
-    return _sp_layout_star(data)
+    return _sp_layout_with_placeholder(data, placeholder="*")
 
-def sp_layout_no_handle_from_json_path(json_path:str):
+def sp_layout_space_from_json_path(json_path:str):
+    "Layout Text, placeholder is space"
+    data = sp_open_ocr_data(json_path)
+    data["lines"] = _split_line_from_data(data["segments"])
+    return _sp_layout_with_placeholder(data, placeholder=' ')
+
+def sp_layout_lines_from_json_path(json_path:str):
+    "Line Text, is 'lines'"
     data = sp_open_ocr_data(json_path)
     data["lines"] = _split_line_from_data(data["segments"])
     document = [" ".join([seg["text"] for seg in line]) for line in data["lines"]]
     document_str = "\n".join(document)
     return document_str
 
-def sp_layout_split_lines_from_json_path(json_path:str):
+def sp_layout_no_handle_from_json_path(json_path:str):
+    "No Any Handle, is 'words'"
     data = sp_open_ocr_data(json_path)
     document = [seg['text'] for seg in data["segments"]]
     document_str = " ".join(document)

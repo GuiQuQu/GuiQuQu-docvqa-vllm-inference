@@ -1,0 +1,26 @@
+[
+    {
+        "image": "xnbl0037_1.png",
+        "layout": "xnbl0037_1.json",
+        "question": "what is the date mentioned in this letter?",
+        "answer": "1/8/93"
+    },
+    {
+        "image": "nmcj0037_1.png",
+        "layout": "nmcj0037_1.json",
+        "question": "Where was the conference held?",
+        "answer": "B&W headquarters"
+    },
+    {
+        "image": "mxcj0037_1.png",
+        "layout": "mxcj0037_1.json",
+        "question": "What is the number at the bottom of the page, in bold?",
+        "answer" : "499150498"
+    },
+    {
+        "image":"mxxj0037_1.png",
+        "layout":"mxxj0037_1.json",
+        "question":"Which test is used to evaluate ART menthol levels that has been shipped?",
+        "answer":"A second Danchi Test"
+    }
+]

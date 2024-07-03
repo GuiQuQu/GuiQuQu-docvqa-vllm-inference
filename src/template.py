@@ -76,7 +76,8 @@ Question: {question}
 Answer:"""
 
 # qwen-vl 微调和推理使用的带vl信息的prompt
-vl_ocr_question_template = """The following is a document image and its corresponding string layout of a document picture, including by "```".Please extract the answer from the document layout based on the document image.
+vl_ocr_question_template = """The following is a document image and its corresponding string layout of a document picture, including by "```".
+Please extract the answer from the document layout based on the document image.
 
 Document Layout Notice:
 In the layout, "*" is used as the placeholder, this meaning the text segment should fill text part and "*" part in document picture.
@@ -131,5 +132,20 @@ Document:
 {layout}
 ```
 Question: {question}
+Answer:"""
+
+vl_inference_template = """
+You are asked to answer questions based on the given document image and its corresponding string layout. The layout and image is included by "```".
+The answers to questions are short text spans token verbatim from the layout or image.This means answers comprise a set of contiguous text tokens present in the layout or image.
+Document Picture:
+```
+{image_path}
+```
+Document:
+```
+{layout}
+```
+Question: {question}
+Directly extrct the answer of the question from the document layout and image with as few words as possible.
 Answer:"""
 

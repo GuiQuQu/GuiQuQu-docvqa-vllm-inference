@@ -30,7 +30,7 @@ class BaseDocVQADataset(Dataset):
         self.ocr_dir = pathlib.Path(ocr_dir)
         self.layout_dir = pathlib.Path(layout_dir)
         self.few_shot_examples = few_shot_examples
-        self._few_shot_prompt = ""
+        self._few_shot_prompt = None
         self.question_template = question_template
         self.few_shot_template = few_shot_template
         self.tokenizer = tokenizer
@@ -43,7 +43,7 @@ class BaseDocVQADataset(Dataset):
         """
             get few-shot prompt function
         """
-        return self._few_shot_prompt
+        return NotImplementedError
 
     def __getitem__(self, idx):
         """
@@ -104,7 +104,7 @@ class DocVQAEvaluateDatasetOnlyImage(BaseDocVQADataset):
             raise ValueError("Invalid question or few-shot template")
 
     def get_few_shot_prompt(self):
-        if self._few_shot_prompt != "":
+        if self._few_shot_prompt != None:
             return self._few_shot_prompt
         text = ""
         for e in self.few_shot_examples:
@@ -156,7 +156,7 @@ class DocVQAEvaluateDatasetOnlyLayout(BaseDocVQADataset):
         self.max_doc_token_cnt = max_doc_token_cnt
 
     def get_few_shot_prompt(self):
-        if self._few_shot_prompt != "":
+        if self._few_shot_prompt != None:
             return self._few_shot_prompt
         text = ""
         for e in self.few_shot_examples:
@@ -220,7 +220,7 @@ class DocVQAEvaluateDatasetImageAndLayout(BaseDocVQADataset):
         self.max_doc_token_cnt = max_doc_token_cnt
     
     def get_few_shot_prompt(self):
-        if self._few_shot_prompt != "":
+        if self._few_shot_prompt != None:
             return self._few_shot_prompt
         text = ""
         for e in self.few_shot_examples:

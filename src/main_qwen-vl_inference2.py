@@ -13,7 +13,7 @@ from docvqa_evalator import DocVQAEvaluator,DocVQAEvaluateDatasetImageAndLayout
 import utils
 import template
 
-question_template = template.vl_ocr_question_template
+question_template = template.vl_inference_template
 
 def qwen_vl_inference(model, tokenizer, prompt:List[str] | str, max_new_tokens:int, max_length:int) -> str | List[str]:
     responses = []
@@ -134,14 +134,15 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed",type=int,default=2024)
     parser.add_argument("--few-shot", action="store_true",default=True)
-    parser.add_argument("--few_shot_example_json_path",type=str,default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
+    parser.add_argument("--few_shot_example_json_path",type=str,
+                        default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--max_length", type=int, default=1408)
     parser.add_argument("--max_doc_token_cnt",type=int,default=1024)
     # new anls log
     parser.add_argument("--log_dir", type=str, default=os.path.join(project_dir,"result/qwen-vl_only-inference"))
-    parser.add_argument("--experiment_name", type=str, default="qwen-vl-int4_no-sft_vl_'vl_ocr_question_template'")
+    parser.add_argument("--experiment_name", type=str, default="qwen-vl-int4_no-sft_vl_'vl_inference_template'")
     # old log
-    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl_only-inference/qwen-vl-int4_no-sft_vl_'vl_ocr_question_template'.jsonl"))
+    parser.add_argument("--log_path",type=str,default=os.path.join(project_dir,"result/qwen-vl_only-inference/qwen-vl-int4_no-sft_vl_'vl_inference_template'.jsonl"))
     args = parser.parse_args()
     main(args)

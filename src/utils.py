@@ -107,8 +107,10 @@ def sp_get_layout_func2(type:str):
     """
     if type == "all-star":
         return handle_ocr.sp_layout_star_from_json_path
+    elif type == "all-space":
+        return handle_ocr.sp_layout_space_from_json_path
     elif type == "lines":
-        return handle_ocr.sp_layout_split_lines_from_json_path
+        return handle_ocr.sp_layout_lines_from_json_path
     elif type == "words":
         return handle_ocr.sp_layout_no_handle_from_json_path
     elif type == "no-placeholder":
