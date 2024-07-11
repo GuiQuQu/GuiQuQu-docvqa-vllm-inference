@@ -23,12 +23,12 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --data_path $DATA \
     --ocr_dir $OCR_DIR \
     --image_dir $IMAGE_DIR \
-    --layout_type "none" \
+    --layout_type "all-star" \
     --add_image True \
-    --add_layout False \
+    --add_layout True \
     --fp16 True \
     --fix_vit True \
-    --output_dir $PROJECT_DIR/output_qwen-vl_sp_qlora_only_image \
+    --output_dir $PROJECT_DIR/output_qwen-vl_qlora_vl_inference_template \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -51,4 +51,4 @@ python ${PROJECT_DIR}/src/finetune_qwen-vl.py \
     --gradient_checkpointing \
     --use_lora ${USE_LORA} \
     --q_lora ${Q_LORA} \
-    # --deepspeed ${DS_CONFIG_PATH}
+    --deepspeed ${DS_CONFIG_PATH}

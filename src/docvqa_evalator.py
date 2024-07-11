@@ -4,6 +4,7 @@ import time
 from typing import Callable,List,Dict
 import pathlib
 from tqdm import tqdm
+
 from transformers import PreTrainedTokenizer
 
 from torch.utils.data import DataLoader,Dataset
@@ -274,6 +275,7 @@ def _model_inference_(model, tokenizer, prompt:List[str] | str, max_new_tokens:i
 def _get_input_ids(prompt:str, tokenizer:PreTrainedTokenizer) -> List[int]:
     return NotImplementedError
 
+
 class DocVQAEvaluator(object):
     def __init__(self,
                 model,
@@ -294,6 +296,8 @@ class DocVQAEvaluator(object):
         self.batch_size = batch_size
         self._create_dataloader()
         self.log_path = log_path
+        if not pathlib.Path(self.log_path).parent.exists():
+            pathlib.Path(self.log_path).parent.mkdir(parents=True,exist_ok=True)
         self.anls = metrics.ANLS(
             result_dir=result_dir,
             experiment_name=experiment_name,

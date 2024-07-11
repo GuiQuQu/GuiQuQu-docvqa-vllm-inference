@@ -38,24 +38,24 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     data_path: str = field(
-        default="/root/autodl-tmp/spdocvqa-dataset/train_v1.0_withQT.json", 
+        default="/home/klwang/data/MPDocVQA/train.json", 
         metadata={"help": "Path to the training data."}
     )
     eval_data_path: str = field(
         default=None, metadata={"help": "Path to the evaluation data."}
     )
     ocr_dir: str = field(
-        default="/root/autodl-tmp/spdocvqa-dataset/ocr", metadata={"help": "Path to the OCR data."}
+        default="/home/klwang/data/MPDocVQA/ocr", metadata={"help": "Path to the OCR data."}
     )
     image_dir : str = field(
-        default="/root/autodl-tmp/spdocvqa-dataset/images", metadata={"help": "Path to the image data."}
+        default="/home/klwang/data/MPDocVQA/images", metadata={"help": "Path to the image data."}
     )
     layout_type: str = field(
         default="all-star",
         metadata={"help": "Layout type for the OCR data. Options: all-star, lines, words, none."},
     )
     add_layout: bool = field(
-        default=False, metadata={"help": "Whether to add layout information to the prompt."}
+        default=True, metadata={"help": "Whether to add layout information to the prompt."}
     )
     add_image: bool = field(
         default=True, metadata={"help": "Whether to add image information to the prompt."}
@@ -101,11 +101,12 @@ def maybe_zero_3(param):
 
 
 # Borrowed from peft.utils.get_peft_model_state_dict
+# 修改了最后mlp的准入权限
 def get_peft_state_maybe_zero_3(named_params, bias):
     if bias == "none":
-        to_return = {k: t for k, t in named_params if "lora_" in k}
+        to_return = {k: t for k, t in named_params if "lora_" in k or k.startswith("mlp")}
     elif bias == "all":
-        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k}
+        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k or k.startswith("mlp")}
     elif bias == "lora_only":
         to_return = {}
         maybe_lora_bias = {}
@@ -117,6 +118,8 @@ def get_peft_state_maybe_zero_3(named_params, bias):
                 lora_bias_names.add(bias_name)
             elif "bias" in k:
                 maybe_lora_bias[k] = t
+            elif k.startswith("mlp"):
+                to_return[k] = t
         for k, t in maybe_lora_bias:
             if bias_name in lora_bias_names:
                 to_return[bias_name] = t
@@ -216,12 +219,6 @@ def preprocess(
         input_ids.append(input_id[:max_len])
         target_ids.append(target[:max_len])
     input_ids = torch.tensor(input_ids, dtype=torch.int)
-    
-    def print_tensor(tensor):
-        torch.set_printoptions(profile="full")
-        print(tensor)
-        torch.set_printoptions(profile="default")
-
     target_ids = torch.tensor(target_ids, dtype=torch.int)
 
     return dict(
@@ -256,7 +253,7 @@ class SupervisedDataset(Dataset):
         )
 
 
-class LazySupervisedDataset(Dataset):
+class MPDocVQALazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
     system_message = "You are a helpful assistant."
     def __init__(self, raw_data, 
@@ -272,13 +269,14 @@ class LazySupervisedDataset(Dataset):
         """
             raw_data: list of dict,是直接获取的json数据
         """
-        super(LazySupervisedDataset, self).__init__()
+        super(MPDocVQALazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.max_len = max_len
 
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
         self.raw_data = raw_data
+        self.init_data()
         self.cached_data_dict = {}
 
         self.layout_func = layout_func
@@ -289,10 +287,28 @@ class LazySupervisedDataset(Dataset):
         self.add_layout = add_layout
         self.add_image = add_image
         self.question_template = question_template
-        
+
+    def init_data(self, raw_data):
+        data = []
+        for item in raw_data:
+            qid = item['questionId']
+            question = item['question']
+            answers = item['answers']
+            answer_page_idx = item['answer_page_idx']
+            for i, page_id in enumerate(item['page_ids']):
+                cls_label = int(answer_page_idx == i)
+                new_item = dict(
+                        qid = qid,
+                        question=question,
+                        answers=answers,
+                        page_id = page_id,
+                        cls_label = cls_label)
+            data.append(new_item)
+        self.data = data
+
 
     def __len__(self):
-        return len(self.raw_data)
+        return len(self.data)
 
     def _prepare_prompt(self,question,image_path = None, layout= None):
         """
@@ -317,14 +333,14 @@ class LazySupervisedDataset(Dataset):
     def prepare_sft_data(self, item):
         question = item["question"]
         answer = random.choice(item["answers"])
-        ocr_path = os.path.join(self.ocr_dir, item["image"].split("/")[-1].split(".")[0] + ".json")
-        image_path = os.path.join(self.image_dir, item["image"].split("/")[-1])
+        page_id = item['page_id']
+        ocr_path = os.path.join(self.ocr_dir, page_id + ".json")
+        image_path = os.path.join(self.image_dir, page_id + ".jpg")
         layout = None
         if self.add_layout:
             layout = self.layout_func(json_path=ocr_path)
             layout = utils.truncate_layout(layout, self.tokenizer, self.max_doc_token_length)
         prompt = self._prepare_prompt(question, image_path, layout)
-        # print(json.dumps({'qid':item['questionId'], 'prompt':prompt}))
         message = [
             {"role": "system", "content": self.system_message},
             {"role": "user", "content": prompt},
@@ -336,18 +352,15 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        message = self.prepare_sft_data(self.raw_data[i])
+        message = self.prepare_sft_data(self.data[i])
         ret = preprocess([message], self.tokenizer, self.max_len)
-        # print(self.raw_data[i]['questionId'])
-        # print(message)
-        # print(str(ret['input_ids'][0].cpu().numpy().tolist()))
-        # print(str(ret['labels'][0].cpu().numpy().tolist()))
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
             attention_mask=ret["attention_mask"][0],
-            question = self.raw_data[i]["question"],
-            image = self.raw_data[i]["image"]
+            question = self.data[i]["question"],
+            page_id = self.data[i]["page_id"],
+            qid = self.data[i]["qid"],
         )
         self.cached_data_dict[i] = ret
 
@@ -359,13 +372,12 @@ def make_supervised_data_module(
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     dataset_cls = (
-        LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
+        MPDocVQALazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
     )
     rank0_print("Loading data...")
 
     def get_template(data_args):
         if data_args.add_layout and data_args.add_image:
-            # return template.vl_ocr_question_template
             return template.vl_inference_template
         elif data_args.add_layout and not data_args.add_image:
             return template.star_question_templatev4
@@ -420,7 +432,7 @@ def train():
     local_rank = training_args.local_rank
 
     device_map = "auto"
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    world_size = int(os.environ.get("WORLD_SIZE", '1'))
     ddp = world_size != 1
     if lora_args.q_lora:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)} if ddp else "auto"
@@ -429,33 +441,61 @@ def train():
                 "FSDP or ZeRO3 are not incompatible with QLoRA."
             )
 
-    # Set RoPE scaling factor
-    config = transformers.AutoConfig.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
-        trust_remote_code=True,
-    )
-    config.use_cache = False
+    # # Set RoPE scaling factor
+    # config = transformers.AutoConfig.from_pretrained(
+    #     model_args.model_name_or_path,
+    #     cache_dir=training_args.cache_dir,
+    #     trust_remote_code=True,
+    # )
+    # config.use_cache = False
 
-    # Load model and tokenizer
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
-        config=config,
-        cache_dir=training_args.cache_dir,
-        device_map=device_map,
-        trust_remote_code=True,
-        quantization_config=GPTQConfig(
-            bits=4, disable_exllama=True
+    # # Load model and tokenizer
+    # model = transformers.AutoModelForCausalLM.from_pretrained(
+    #     model_args.model_name_or_path,
+    #     config=config,
+    #     cache_dir=training_args.cache_dir,
+    #     device_map=device_map,
+    #     trust_remote_code=True,
+    #     quantization_config=GPTQConfig(
+    #         bits=4, disable_exllama=True
+    #     )
+    #     if training_args.use_lora and lora_args.q_lora
+    #     else None,
+    # )
+    from models.docvqa_model import MPDocVQAModel
+    if training_args.use_lora:
+        model = MPDocVQAModel(
+            model_path=model_args.model_name_or_path,
+            device_map=device_map,
+            lora_config={
+                'r': lora_args.lora_r,
+                'lora_alpha': lora_args.lora_alpha,
+                'lora_dropout': lora_args.lora_dropout,
+                'bias': lora_args.lora_bias,
+                'target_modules': lora_args.lora_target_modules,
+                'task_type': 'CAUSAL_LM',
+                'modules_to_save': None
+            },
+            q_lora=lora_args.q_lora,
+            gradient_checkpointing=training_args.gradient_checkpointing,
+            freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
         )
-        if training_args.use_lora and lora_args.q_lora
-        else None,
-    )
+    else:
+        model = MPDocVQAModel(
+            model_path=model_args.model_name_or_path,
+            device_map=device_map,
+            lora_config=None,
+            q_lora=False,
+            gradient_checkpointing=training_args.gradient_checkpointing,
+            freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
+        )
 
-    if not training_args.use_lora:
-        if training_args.fix_vit and hasattr(model,'transformer') and hasattr(model.transformer,'visual'):
-            model.transformer.visual.requires_grad_(False)
-            if hasattr(model.transformer.visual,'attn_pool'):
-                model.transformer.visual.attn_pool.requires_grad_(True)
+    # if not training_args.use_lora:
+    #     if training_args.fix_vit and hasattr(model,'transformer') and hasattr(model.transformer,'visual'):
+    #         model.transformer.visual.requires_grad_(False)
+    #         if hasattr(model.transformer.visual,'attn_pool'):
+    #             model.transformer.visual.attn_pool.requires_grad_(True)
+
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -466,32 +506,8 @@ def train():
     )
     tokenizer.pad_token_id = tokenizer.eod_id
 
-    if training_args.use_lora:
-        if lora_args.q_lora or "chat" in model_args.model_name_or_path.lower():
-            modules_to_save = None
-        else:
-            modules_to_save = ["wte", "lm_head"]
-        lora_config = LoraConfig(
-            r=lora_args.lora_r,
-            lora_alpha=lora_args.lora_alpha,
-            target_modules=lora_args.lora_target_modules,
-            lora_dropout=lora_args.lora_dropout,
-            bias=lora_args.lora_bias,
-            task_type="CAUSAL_LM",
-            modules_to_save=modules_to_save  # This argument serves for adding new tokens.
-        )
-        if lora_args.q_lora:
-            model = prepare_model_for_kbit_training(
-                model, use_gradient_checkpointing=training_args.gradient_checkpointing
-            )
-
-        model = get_peft_model(model, lora_config)
-
-        if training_args.gradient_checkpointing:
-            model.enable_input_require_grads()
 
     # Load data
-    logger.info(f"Add Image={data_args.add_image}, Add Layout={data_args.add_layout}")
     data_module = make_supervised_data_module(
         tokenizer=tokenizer, data_args=data_args, max_len=training_args.model_max_length
     )

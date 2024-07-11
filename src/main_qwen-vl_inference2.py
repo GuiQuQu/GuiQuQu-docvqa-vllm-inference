@@ -123,7 +123,7 @@ if __name__ == "__main__":
     pretrain_model_dir = "/home/klwang/pretrain-model"
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path",type=str,
-                        default="/home/klwang/pretrain-model/Qwen-VL-Chat-Int4")
+                        default=None)
     parser.add_argument("--adapter_name_or_path",type=str,
                         default=None)
     parser.add_argument("--eval_json_data_path",type=str,default= os.path.join(data_dir,"val_v1.0_withQT.json"))
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     parser.add_argument("--layout_dir",type=str,default=os.path.join(data_dir,"layout"))
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed",type=int,default=2024)
-    parser.add_argument("--few-shot", action="store_true",default=True)
+    parser.add_argument("--few-shot", action="store_true",default=False)
     parser.add_argument("--few_shot_example_json_path",type=str,
                         default=os.path.join(project_dir,"few_shot_examples","sp_few_shot_example.json"))
     parser.add_argument("--max_new_tokens", type=int, default=128)

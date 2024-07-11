@@ -1,5 +1,5 @@
 PROJECT_DIR="/home/klwang/code/GuiQuQu-docvqa-vllm-inference"
-ADAPTER_DIR="$PROJECT_DIR/output_qwen-vl_sp_qlora_only_image"
+ADAPTER_DIR="$PROJECT_DIR/output_qwen-vl_qlora_vl_inference_template"
 cd $PROJECT_DIR
 
 start=100

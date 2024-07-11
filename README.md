@@ -137,4 +137,15 @@ Question: {question}
 Directly extrct the answer of the question from the document layout and image with as few words as possible.
 Answer:"""
 ```
+2024-07-10  
+- (finish) TODO1. 模型训练完毕且评测完毕，anls 最高 0.7831，提升不明显。
+- (finish) TODO2. 完成mp ocr转layout的代码，目前测试了几个样例，还可以
+
+2024-07-10
+1. 采用输入单图+问题的方式来完成mp-docvqa任务
+做法. 要求模型生成两个内容 1.答案 2.置信度
+- 答案的生成依靠qwen-vl model，置信度通过外接额外的模块完成（例如 mlp）
+- 损失 预测next token 的loss + bce loss(二分类)
+- mlp的输入应该是什么 1.input_embeds 2.hidden_states 目前考虑先使用hidden_states看一看
+- 数据 正例答案置信度为1，负例答案置信度为0,当为正例时，这时考虑加入next toekn loss,负例只看bce loss
 
