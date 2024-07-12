@@ -34,6 +34,7 @@ class MPDocVQAModel(nn.Module):
         gradient_checkpointing: bool = False,
         freeze_modules: List[str] = ["transformer.visual"],
     ):
+        super(MPDocVQAModel, self).__init__()
         self.on_test_mode = test_mode
         self.config = QWenConfig.from_pretrained(model_path)
         if not test_mode:

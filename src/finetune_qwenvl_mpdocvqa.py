@@ -466,7 +466,7 @@ def train():
     if training_args.use_lora:
         model = MPDocVQAModel(
             model_path=model_args.model_name_or_path,
-            device_map=device_map,
+            qwenvl_device_map=device_map,
             lora_config={
                 'r': lora_args.lora_r,
                 'lora_alpha': lora_args.lora_alpha,
