@@ -275,8 +275,8 @@ class MPDocVQALazySupervisedDataset(Dataset):
 
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
-        self.raw_data = raw_data
-        self.init_data()
+        # self.raw_data = raw_data
+        self.init_data(raw_data)
         self.cached_data_dict = {}
 
         self.layout_func = layout_func

@@ -3,13 +3,15 @@ from torch import nn
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import GPTQConfig
+from transformers import PreTrainedModel
 
-from Qwen_VL.modeling_qwen import QWenLMHeadModelForDocVQA, QWenConfig
+from Qwen_VL.modeling_qwen import QWenLMHeadModelForDocVQA, QWenConfig,QWenModel
 from Qwen_VL.tokenization_qwen import QWenTokenizer
 
 
 class MLP(nn.Module):
     def __init__(self, sizes: List[int], bias: bool = False):
+        super(MLP, self).__init__()
         self.layers = nn.ModuleList()
         for i in range(len(sizes) - 1):
             self.layers.append(nn.Linear(sizes[i], sizes[i + 1], bias=bias))
@@ -22,41 +24,53 @@ class MLP(nn.Module):
             if i != len(self.layers) - 1:
                 x = self.act(x)
         return x
-
-class MPDocVQAModel(nn.Module):
-    def __init__(
-        self,
-        model_path: str,
-        qwenvl_device_map,
-        lora_config: dict = None,
-        test_mode: bool = False,
-        q_lora: bool = True,
-        gradient_checkpointing: bool = False,
-        freeze_modules: List[str] = ["transformer.visual"],
-    ):
-        super(MPDocVQAModel, self).__init__()
-        self.on_test_mode = test_mode
-        self.config = QWenConfig.from_pretrained(model_path)
-        if not test_mode:
-            self.config.use_cache = False
+    
+class MPDocVQAConfig:
+    def __init__(self, model_path: str, qwenvl_device_map, lora_config: dict = None, test_mode: bool = False, q_lora: bool = True, gradient_checkpointing: bool = False, freeze_modules: List[str] = ["transformer.visual"]):
+        self.model_path = model_path
+        self.qwenvl_device_map = qwenvl_device_map
+        self.lora_config = lora_config
+        self.test_mode = test_mode
         self.q_lora = q_lora
         self.gradient_checkpointing = gradient_checkpointing
+        self.freeze_modules = freeze_modules
+
+class PreMPDocVQAModel(PreTrainedModel):
+    def __init__(self,config):
+        super(PreMPDocVQAModel, self).__init__(config)
+    
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, QWenModel):
+            module.gradient_checkpointing = value
+
+class MPDocVQAModel(PreMPDocVQAModel):
+    def __init__(
+        self,
+        config,
+    ):
+        super(MPDocVQAModel, self).__init__()
+        self.on_test_mode = config.test_mode
+        self.config = QWenConfig.from_pretrained(config.model_path)
+        if not config.test_mode:
+            self.config.use_cache = False
+        self.q_lora = config.q_lora
+        self.gradient_checkpointing = config.gradient_checkpointing
         self.qwenvl: QWenLMHeadModelForDocVQA = (
             QWenLMHeadModelForDocVQA.from_pretrained(
-                model_path,
-                device_map = qwenvl_device_map, 
+                config.model_path,
+                device_map = config.qwenvl_device_map, 
                 config=self.config,
-                quantization_config= GPTQConfig(bits=4, disable_exllama=True) if lora_config and q_lora else None
+                quantization_config= GPTQConfig(bits=4, disable_exllama=True) if config.lora_config and config.q_lora else None
             )
         )
-        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(model_path)
+        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(config.model_path)
         self.pad_id = self.tokenizer.eod_id
-        self.freeze_params(freeze_modules)
-        if gradient_checkpointing and not lora_config:
-            self.qwenvl.gradient_checkpointing_enable()
+        self.freeze_params(config.freeze_modules)
+        # if gradient_checkpointing and not lora_config:
+        #     self.qwenvl.gradient_checkpointing_enable()
 
-        if lora_config:
-            self.lora_model(lora_config, q_lora, gradient_checkpointing)
+        if config.lora_config:
+            self.lora_model(config.lora_config, config.q_lora, config.gradient_checkpointing)
         self.mlp = MLP([self.config.hidden_size, 512, 256, 1])
 
     def lora_model(self, lora_config, q_lora: bool, gradient_checkpointing):
