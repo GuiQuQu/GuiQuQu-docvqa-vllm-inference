@@ -30,13 +30,13 @@ python ${PROJECT_DIR}/src/finetune_qwenvl_mpdocvqa.py \
     --fix_vit True \
     --output_dir $PROJECT_DIR/output_mpdocvqa_qwenvl_qlora_vl_inference_template \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --seed 2024 \
-    --save_steps 100 \
+    --save_steps 1 \
     --save_total_limit 50 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \

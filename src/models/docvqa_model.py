@@ -3,7 +3,8 @@ from torch import nn
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import GPTQConfig
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel,PretrainedConfig
+from einops import repeat
 
 from Qwen_VL.modeling_qwen import QWenLMHeadModelForDocVQA, QWenConfig,QWenModel
 from Qwen_VL.tokenization_qwen import QWenTokenizer
@@ -25,7 +26,7 @@ class MLP(nn.Module):
                 x = self.act(x)
         return x
     
-class MPDocVQAConfig:
+class MPDocVQAConfig(PretrainedConfig):
     def __init__(self, model_path: str, qwenvl_device_map, lora_config: dict = None, test_mode: bool = False, q_lora: bool = True, gradient_checkpointing: bool = False, freeze_modules: List[str] = ["transformer.visual"]):
         self.model_path = model_path
         self.qwenvl_device_map = qwenvl_device_map
@@ -36,6 +37,7 @@ class MPDocVQAConfig:
         self.freeze_modules = freeze_modules
 
 class PreMPDocVQAModel(PreTrainedModel):
+    supports_gradient_checkpointing = True
     def __init__(self,config):
         super(PreMPDocVQAModel, self).__init__(config)
     
@@ -46,9 +48,9 @@ class PreMPDocVQAModel(PreTrainedModel):
 class MPDocVQAModel(PreMPDocVQAModel):
     def __init__(
         self,
-        config,
+        config:MPDocVQAConfig,
     ):
-        super(MPDocVQAModel, self).__init__()
+        super(MPDocVQAModel, self).__init__(config)
         self.on_test_mode = config.test_mode
         self.config = QWenConfig.from_pretrained(config.model_path)
         if not config.test_mode:
@@ -71,7 +73,7 @@ class MPDocVQAModel(PreMPDocVQAModel):
 
         if config.lora_config:
             self.lora_model(config.lora_config, config.q_lora, config.gradient_checkpointing)
-        self.mlp = MLP([self.config.hidden_size, 512, 256, 1])
+        self.page_mlp = MLP([self.config.hidden_size, 512, 256, 1])
 
     def lora_model(self, lora_config, q_lora: bool, gradient_checkpointing):
         lora_config = LoraConfig(**lora_config)
@@ -99,15 +101,21 @@ class MPDocVQAModel(PreMPDocVQAModel):
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,
+            output_hidden_states=True,
             return_dict=True,
         )
-        llm_loss = outputs.loss  # [bsz]
+        
+        bsz, _ = input_ids.size()
+        llm_loss = outputs.loss.view(bsz,-1)  # [bsz,seq_len]
         hidden_states = outputs.hidden_states[-1]
-        llm_embedding = self.get_last_one_hidden_states(hidden_states, input_ids)
-        logits = self.mlp(llm_embedding)
+        llm_embedding = self.get_last_one_hidden_states(hidden_states, input_ids) # [bsz,hidden_size]
+        logits = self.page_mlp(llm_embedding) # [bsz,1]
         classification_loss_fct = nn.BCEWithLogitsLoss(reduction="none")
-        cls_loss = classification_loss_fct(logits, cls_labels)  # [bsz]
-        llm_loss_weight = (cls_labels == 1).long()
+        cls_labels = cls_labels.to(device=logits.device, dtype=logits.dtype)
+        cls_loss = classification_loss_fct(logits, cls_labels.view(bsz,-1))  # [bsz,1]
+        llm_loss_weight = (cls_labels == 1).long().view(bsz,-1) # [bsz,1]
+        # llm_loss size: [bsz, seq_len]
+        llm_loss_weight = repeat(llm_loss_weight, 'b 1-> b (s 1)', s=llm_loss.size(1))
         loss = (llm_loss * llm_loss_weight + cls_loss).mean()
 
         loss = loss.mean()

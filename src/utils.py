@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 import handle_ocr
+import handle_ocr.mp
 
 def truncate_layout(layout:str, 
                     tokenizer:PreTrainedTokenizer = None, 
@@ -110,14 +111,24 @@ def sp_get_layout_func2(type:str):
     elif type == "all-space":
         return handle_ocr.sp_layout_space_from_json_path
     elif type == "lines":
-        return handle_ocr.sp_layout_lines_from_json_path
+        return handle_ocr.sp_layout_lines_from_json_path # 仅做行切分
     elif type == "words":
-        return handle_ocr.sp_layout_no_handle_from_json_path
+        return handle_ocr.sp_layout_no_handle_from_json_path # 把所有的text segment仅用空格隔开
     elif type == "no-placeholder":
-        return handle_ocr.sp_layout_no_placeholder_from_json_path
+        return handle_ocr.sp_layout_no_placeholder_from_json_path # LATIN-Prompt的个人实现
     else:
         raise ValueError("Not support layout pattern")
 
+def mp_get_layout_func(type:str):
+    """
+        mp docvqa layout获取函数
+    """
+    if type == "all-star":
+        return partial(handle_ocr.mp_laytout_from_json_path,placeholder="*")
+    elif type == 'all-space':
+        return partial(handle_ocr.mp_laytout_from_json_path,placeholder=" ")
+    else:
+        raise ValueError(f"Not support layout pattern: {type}")
 
 class Response(object):
     def __init__(self, text:str, 

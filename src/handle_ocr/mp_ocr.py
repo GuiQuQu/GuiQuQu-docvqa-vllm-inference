@@ -19,7 +19,7 @@ def mp_open_ocr_data(json_path: str):
     ocr_data["page_width"] = bbox.width
     ocr_data["page_height"] = bbox.height
     segments = []
-    for line in data["LINE"]:
+    for line in data.get("LINES",[]):
         item = {}
         item['text'] = line["Text"]
         item['bbox'] = MPBBox(line["Geometry"]["BoundingBox"])
@@ -60,7 +60,7 @@ def _split_line_from_data(data:List[dict]):
     result = [sorted(line,key=lambda x:x['bbox'].left) for line in result]
     return result
 
-def _mp_layout_with_placeholder(data:Dict[str,any],placeholder:str):
+def _mp_layout_with_placeholder(data:Dict[str,any],placeholder:str|None):
     "placeholder: str"
     max_line_char_cnt = 0
     page_width = data['page_width']
@@ -107,14 +107,16 @@ def _mp_layout_with_placeholder(data:Dict[str,any],placeholder:str):
     document_str = "\n".join(document_lines)
     return document_str
 
-def mp_laytout_from_json_path(json_path,placehloder= '*'):
+def mp_laytout_from_json_path(json_path, placeholder= '*'):
     data = mp_open_ocr_data(json_path)
+    if len(data['segments']) == 0:
+        return ""
     data['lines'] = _split_line_from_data(data['segments'])
-    return _mp_layout_with_placeholder(data,placehloder)
+    return _mp_layout_with_placeholder(data,placeholder)
 
 def main():
     json_path = "/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src/handle_ocr/mp/snbx0223_p19.json"
-    mp_layout = mp_laytout_from_json_path(json_path, placehloder="*")
+    mp_layout = mp_laytout_from_json_path(json_path, placeholder="*")
     with open("./mp/layout_mp.txt","w",encoding="utf-8") as f:
         f.write(mp_layout)
 

@@ -102,11 +102,11 @@ def maybe_zero_3(param):
 
 # Borrowed from peft.utils.get_peft_model_state_dict
 # 修改了最后mlp的准入权限
-def get_peft_state_maybe_zero_3(named_params, bias):
+def get_peft_state_maybe_zero_3(named_params, bias, to_save_names = []):
     if bias == "none":
-        to_return = {k: t for k, t in named_params if "lora_" in k or k.startswith("mlp")}
+        to_return = {k: t for k, t in named_params if "lora_" in k or any([n in k for n in to_save_names])}
     elif bias == "all":
-        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k or k.startswith("mlp")}
+        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k or any([n in k for n in to_save_names])}
     elif bias == "lora_only":
         to_return = {}
         maybe_lora_bias = {}
@@ -118,7 +118,7 @@ def get_peft_state_maybe_zero_3(named_params, bias):
                 lora_bias_names.add(bias_name)
             elif "bias" in k:
                 maybe_lora_bias[k] = t
-            elif k.startswith("mlp"):
+            elif any([n in k for n in to_save_names]):
                 to_return[k] = t
         for k, t in maybe_lora_bias:
             if bias_name in lora_bias_names:
@@ -361,6 +361,7 @@ class MPDocVQALazySupervisedDataset(Dataset):
             question = self.data[i]["question"],
             page_id = self.data[i]["page_id"],
             qid = self.data[i]["qid"],
+            cls_labels = self.data[i]["cls_label"]
         )
         self.cached_data_dict[i] = ret
 
@@ -390,7 +391,7 @@ def make_supervised_data_module(
     train_dataset = dataset_cls(train_data, 
                                 ocr_dir=data_args.ocr_dir,
                                 image_dir=data_args.image_dir,
-                                layout_func=utils.get_layout_func(data_args.layout_type),
+                                layout_func=utils.mp_get_layout_func(data_args.layout_type),
                                 question_template=get_template(data_args),
                                 tokenizer=tokenizer, 
                                 max_len=max_len,
@@ -462,9 +463,9 @@ def train():
     #     if training_args.use_lora and lora_args.q_lora
     #     else None,
     # )
-    from models.docvqa_model import MPDocVQAModel
+    from models.docvqa_model import MPDocVQAModel,MPDocVQAConfig
     if training_args.use_lora:
-        model = MPDocVQAModel(
+        config = MPDocVQAConfig(
             model_path=model_args.model_name_or_path,
             qwenvl_device_map=device_map,
             lora_config={
@@ -480,8 +481,9 @@ def train():
             gradient_checkpointing=training_args.gradient_checkpointing,
             freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
         )
+        model = MPDocVQAModel(config=config)
     else:
-        model = MPDocVQAModel(
+        config = MPDocVQAConfig(
             model_path=model_args.model_name_or_path,
             device_map=device_map,
             lora_config=None,
@@ -489,6 +491,7 @@ def train():
             gradient_checkpointing=training_args.gradient_checkpointing,
             freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
         )
+        model = MPDocVQAModel(config=config)
 
     # if not training_args.use_lora:
     #     if training_args.fix_vit and hasattr(model,'transformer') and hasattr(model.transformer,'visual'):
