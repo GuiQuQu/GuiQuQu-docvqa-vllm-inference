@@ -18,6 +18,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 # Remember to use --fp16 instead of --bf16 due to autogptq
 # --fix_vit只有在全量微调时才会生效
+# --250
 python ${PROJECT_DIR}/src/finetune_qwenvl_mpdocvqa.py \
     --model_name_or_path $MODEL \
     --data_path $DATA \
@@ -28,7 +29,7 @@ python ${PROJECT_DIR}/src/finetune_qwenvl_mpdocvqa.py \
     --add_layout True \
     --fp16 True \
     --fix_vit True \
-    --output_dir $PROJECT_DIR/output_mpdocvqa_qwenvl_qlora_vl_inference_template \
+    --output_dir $PROJECT_DIR/output_mpdocvqav2_qwenvl_qlora_vl_inference_template \
     --num_train_epochs 1 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
@@ -36,12 +37,12 @@ python ${PROJECT_DIR}/src/finetune_qwenvl_mpdocvqa.py \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --seed 2024 \
-    --save_steps 1 \
+    --save_steps 5 \
     --save_total_limit 50 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \
     --adam_beta2 0.95 \
-    --warmup_ratio 0.01 \
+    --warmup_ratio 0.05 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --report_to "tensorboard" \

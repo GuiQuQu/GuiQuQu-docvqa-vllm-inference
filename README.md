@@ -149,3 +149,6 @@ Answer:"""
 - mlp的输入应该是什么 1.input_embeds 2.hidden_states 目前考虑先使用hidden_states看一看
 - 数据 正例答案置信度为1，负例答案置信度为0,当为正例时，这时考虑加入next toekn loss,负例只看bce loss
 
+mpdocvqa做法
+1. query + image 过模型,拿到预测分score + answer,选择score分最高的那一组的answer作为答案
+

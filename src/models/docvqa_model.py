@@ -1,13 +1,30 @@
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 from torch import nn
 import torch
+from einops import repeat
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import GPTQConfig
-from transformers import PreTrainedModel,PretrainedConfig
-from einops import repeat
+from transformers import PreTrainedModel, PretrainedConfig, PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, GenerationConfig, StoppingCriteriaList
+from transformers.generation.logits_process import LogitsProcessorList
 
-from Qwen_VL.modeling_qwen import QWenLMHeadModelForDocVQA, QWenConfig,QWenModel
+from Qwen_VL.modeling_qwen import (
+    QWenLMHeadModelForDocVQA,
+    QWenConfig,
+    QWenModel,
+    _SENTINEL,
+    _ERROR_BAD_CHAT_FORMAT,
+    _ERROR_STREAM_IN_CHAT,
+)
+from Qwen_VL.configuration_qwen import QWenConfig
 from Qwen_VL.tokenization_qwen import QWenTokenizer
+from Qwen_VL.qwen_generation_utils import (
+    HistoryType,
+    make_context,
+    decode_tokens,
+    get_stop_words_ids,
+    StopWordsLogitsProcessor,
+)
 
 
 class MLP(nn.Module):
@@ -25,9 +42,21 @@ class MLP(nn.Module):
             if i != len(self.layers) - 1:
                 x = self.act(x)
         return x
-    
-class MPDocVQAConfig(PretrainedConfig):
-    def __init__(self, model_path: str, qwenvl_device_map, lora_config: dict = None, test_mode: bool = False, q_lora: bool = True, gradient_checkpointing: bool = False, freeze_modules: List[str] = ["transformer.visual"]):
+
+
+class MPDocVQAConfig(QWenConfig):
+    def __init__(
+        self,
+        model_path: str,
+        qwenvl_device_map,
+        lora_config: dict = None,
+        test_mode: bool = False,
+        q_lora: bool = True,
+        gradient_checkpointing: bool = False,
+        freeze_modules: List[str] = ["transformer.visual"],
+        **kwargs,
+    ):
+        super(MPDocVQAConfig, self).__init__(**kwargs)
         self.model_path = model_path
         self.qwenvl_device_map = qwenvl_device_map
         self.lora_config = lora_config
@@ -36,44 +65,50 @@ class MPDocVQAConfig(PretrainedConfig):
         self.gradient_checkpointing = gradient_checkpointing
         self.freeze_modules = freeze_modules
 
+
 class PreMPDocVQAModel(PreTrainedModel):
+    config_class = MPDocVQAConfig
     supports_gradient_checkpointing = True
-    def __init__(self,config):
-        super(PreMPDocVQAModel, self).__init__(config)
     
+    def __init__(self, config):
+        super(PreMPDocVQAModel, self).__init__(config)
+
     def _set_gradient_checkpointing(self, module, value=False):
         if isinstance(module, QWenModel):
             module.gradient_checkpointing = value
 
+
 class MPDocVQAModel(PreMPDocVQAModel):
-    def __init__(
-        self,
-        config:MPDocVQAConfig,
-    ):
+    def __init__(self,config: MPDocVQAConfig):
         super(MPDocVQAModel, self).__init__(config)
-        self.on_test_mode = config.test_mode
-        self.config = QWenConfig.from_pretrained(config.model_path)
+        breakpoint()
+        self.config = config
+        # self.on_test_mode = config.test_mode
         if not config.test_mode:
-            self.config.use_cache = False
-        self.q_lora = config.q_lora
-        self.gradient_checkpointing = config.gradient_checkpointing
+            config.use_cache = False
         self.qwenvl: QWenLMHeadModelForDocVQA = (
             QWenLMHeadModelForDocVQA.from_pretrained(
                 config.model_path,
-                device_map = config.qwenvl_device_map, 
-                config=self.config,
-                quantization_config= GPTQConfig(bits=4, disable_exllama=True) if config.lora_config and config.q_lora else None
+                device_map=config.qwenvl_device_map,
+                config=config,
+                quantization_config=(
+                    GPTQConfig(bits=4, disable_exllama=True)
+                    if config.lora_config and config.q_lora
+                    else None
+                ),
             )
         )
         self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(config.model_path)
         self.pad_id = self.tokenizer.eod_id
         self.freeze_params(config.freeze_modules)
-        # if gradient_checkpointing and not lora_config:
-        #     self.qwenvl.gradient_checkpointing_enable()
+        if config.gradient_checkpointing and not config.lora_config:
+            self.qwenvl.gradient_checkpointing_enable()
 
         if config.lora_config:
-            self.lora_model(config.lora_config, config.q_lora, config.gradient_checkpointing)
-        self.page_mlp = MLP([self.config.hidden_size, 512, 256, 1])
+            self.lora_model(
+                config.lora_config, config.q_lora, config.gradient_checkpointing
+            )
+        self.page_mlp = MLP([config.hidden_size, 512, 256, 1])
 
     def lora_model(self, lora_config, q_lora: bool, gradient_checkpointing):
         lora_config = LoraConfig(**lora_config)
@@ -104,22 +139,29 @@ class MPDocVQAModel(PreMPDocVQAModel):
             output_hidden_states=True,
             return_dict=True,
         )
-        
-        bsz, _ = input_ids.size()
-        llm_loss = outputs.loss.view(bsz,-1)  # [bsz,seq_len]
-        hidden_states = outputs.hidden_states[-1]
-        llm_embedding = self.get_last_one_hidden_states(hidden_states, input_ids) # [bsz,hidden_size]
-        logits = self.page_mlp(llm_embedding) # [bsz,1]
-        classification_loss_fct = nn.BCEWithLogitsLoss(reduction="none")
-        cls_labels = cls_labels.to(device=logits.device, dtype=logits.dtype)
-        cls_loss = classification_loss_fct(logits, cls_labels.view(bsz,-1))  # [bsz,1]
-        llm_loss_weight = (cls_labels == 1).long().view(bsz,-1) # [bsz,1]
-        # llm_loss size: [bsz, seq_len]
-        llm_loss_weight = repeat(llm_loss_weight, 'b 1-> b (s 1)', s=llm_loss.size(1))
-        loss = (llm_loss * llm_loss_weight + cls_loss).mean()
 
-        loss = loss.mean()
+        bsz, _ = input_ids.size()
+        llm_loss = outputs.loss.view(bsz, -1)  # [bsz,seq_len]
+        hidden_states = outputs.hidden_states[-1]
+        llm_embedding = self.get_last_one_hidden_states(
+            hidden_states, input_ids
+        )  # [bsz,hidden_size]
+        logits = self.page_mlp(llm_embedding)  # [bsz,1]
         score = torch.sigmoid(logits)
+        loss = None
+        if cls_labels is not None and labels is not None:
+            classification_loss_fct = nn.BCEWithLogitsLoss(reduction="none")
+            cls_labels = cls_labels.to(device=logits.device, dtype=logits.dtype)
+            cls_loss = classification_loss_fct(
+                logits, cls_labels.view(bsz, -1)
+            )  # [bsz,1]
+            llm_loss_weight = (cls_labels == 1).long().view(bsz, -1)  # [bsz,1]
+            # llm_loss size: [bsz, seq_len]
+            llm_loss_weight = repeat(
+                llm_loss_weight, "b 1-> b (s 1)", s=llm_loss.size(1)
+            )
+            loss = (llm_loss * llm_loss_weight + cls_loss).mean()
+            loss = loss.mean()
         return loss, score
 
     def get_last_one_hidden_states(
@@ -152,3 +194,104 @@ class MPDocVQAModel(PreMPDocVQAModel):
 
     def generate(self, *args, **kwargs):
         return self.qwenvl.generate(*args, **kwargs)
+
+    def predict(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        query: str,
+        history: Optional[HistoryType],
+        generation_config: Optional[GenerationConfig],
+        system: str = "You are a helpful assistant.",
+        append_history: bool = True,
+        stream: Optional[bool] = _SENTINEL,
+        stop_words_ids: Optional[List[List[int]]] = None,
+        **kwargs,
+    ) -> Tuple[str, HistoryType]:
+        generation_config = (
+            generation_config
+            if generation_config is not None
+            else self.generation_config
+        )
+
+        assert stream is _SENTINEL, _ERROR_STREAM_IN_CHAT
+        assert generation_config.chat_format == "chatml", _ERROR_BAD_CHAT_FORMAT
+        if history is None:
+            history = []
+        if stop_words_ids is None:
+            stop_words_ids = []
+
+        max_window_size = kwargs.get("max_window_size", None)
+        if max_window_size is None:
+            max_window_size = generation_config.max_window_size
+        raw_text, context_tokens = make_context(
+            tokenizer,
+            query,
+            history=history,
+            system=system,
+            max_window_size=max_window_size,
+            chat_format=generation_config.chat_format,
+        )
+
+        stop_words_ids.extend(
+            get_stop_words_ids(generation_config.chat_format, tokenizer)
+        )
+        input_ids = torch.tensor([context_tokens]).to(self.device)
+        attention_mask = torch.ne(input_ids, self.tokenizer.pad_token_id)
+        # predict score
+        _, score = self.forward(input_ids=input_ids, attention_mask=attention_mask)
+        outputs = self.generate(
+            input_ids,
+            stop_words_ids=stop_words_ids,
+            return_dict_in_generate=False,
+            generation_config=generation_config,
+            **kwargs,
+        )
+
+        response = decode_tokens(
+            outputs[0],
+            tokenizer,
+            raw_text_len=len(raw_text),
+            context_length=len(context_tokens),
+            chat_format=generation_config.chat_format,
+            verbose=False,
+            errors="replace",
+        )
+
+        if append_history:
+            history.append((query, response))
+
+        return response, score, history
+
+
+def mpdocvqa_model_inference(
+    model: MPDocVQAModel,
+    tokenizer,
+    prompt: List[str] | str,
+    max_new_tokens: int,
+    max_length: int,
+) -> Dict[str, List[Any]]:
+    resp_list, score_list = [], []
+    if isinstance(prompt, str):
+        prompt = [prompt]
+    for p in prompt:
+        resp, score, _ = model.predict(
+            tokenizer, p, None, None, max_new_tokens=max_new_tokens
+        )
+        resp_list.append(resp)
+        score_list.append(score)
+
+    return {
+        "response": resp_list,
+        "score": score_list,
+    }
+
+
+def mpvqa_get_input_ids(prompt: str, tokenizer: PreTrainedTokenizer) -> List[int]:
+    _, content_tokens = make_context(
+        tokenizer,
+        prompt,
+        history=None,
+        system="You are a helpful assistant.",
+        chat_format="chatml",
+    )
+    return content_tokens

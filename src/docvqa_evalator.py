@@ -269,9 +269,11 @@ def merge_dict_collate_fn(batch):
         ret[key] = [d[key] for d in batch]
     return ret
 
+# 传入模型推理函数
 def _model_inference_(model, tokenizer, prompt:List[str] | str, max_new_tokens:int, max_length:int) -> str | List[str]:
     return NotImplementedError
 
+# 传入通过prompt获取input_ids的函数
 def _get_input_ids(prompt:str, tokenizer:PreTrainedTokenizer) -> List[int]:
     return NotImplementedError
 
