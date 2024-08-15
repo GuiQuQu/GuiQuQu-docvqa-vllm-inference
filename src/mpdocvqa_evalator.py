@@ -23,7 +23,7 @@ class BaseMPDocVQADatasetForEval(Dataset):
     ):
         self.data = utils.load_data(json_data_path)
         self.image_dir = Path(image_dir)
-        self.layout_dir = Path(layout_dir)
+        self.layout_dir = Path(layout_dir) if isinstance(layout_dir, str) else layout_dir
         self.ocr_dir = Path(ocr_dir)
         self.question_template = question_template
         self.tokenizer = tokenizer
@@ -37,9 +37,9 @@ class BaseMPDocVQADatasetForEval(Dataset):
         question = item["question"]
         page_ids = item["page_ids"]
 
-        image_paths = ([self.image_dir / f"{page_id}.jpg" for page_id in page_ids],)
+        image_paths = [self.image_dir / f"{page_id}.jpg" for page_id in page_ids]
         ocr_paths = [self.ocr_dir / f"{page_id}.json" for page_id in page_ids]
-        layout_paths = None
+        layout_paths = [None] * len(page_ids)
         if self.layout_dir is not None:
             layout_paths = [self.layout_dir / f"{page_id}.txt" for page_id in page_ids]
         ret = dict(
@@ -86,13 +86,13 @@ class MPDocVQADatasetForEvalWithLayoutAndImage(BaseMPDocVQADatasetForEval):
         is_truncateds = []
         for layout in layouts:
             truncated_layout, is_truncated = utils.truncate_layout2(
-                layout, self.max_doc_token_cnt
+                layout, self.tokenizer, self.max_doc_token_cnt
             )
             truncated_layouts.append(truncated_layout)
             is_truncateds.append(is_truncated)
         querys = [
             self.question_template.format(
-                image_path=f"<img>{item['image_path'][i]}</img>",
+                image_path=f"<img>{item['image_paths'][i]}</img>",
                 layout=truncated_layouts[i],
                 question=item["question"],
             )
@@ -138,9 +138,10 @@ class MPDocVQAEvaluator:
             dataset_name="mpdocvqa"
         )
         self.get_input_ids_fn = get_input_ids_fn
-        self.model_inference_fn = model_inference_fn,
+        self.model_inference_fn = model_inference_fn
         self.max_new_tokens = max_new_tokens
         self.max_length = max_length
+        self.log_path = Path(result_dir) / f"{experiment_name}_eval.log"
     
     def _create_dataloader(self):
         self.data_loader = DataLoader(
@@ -152,46 +153,51 @@ class MPDocVQAEvaluator:
     
     def evaluate(self):
         mpdocvqa_items = []
-        for i, batch in enumerate(tqdm(self.data_loader)):
-            prompts:List[List[List[Dict]]] = batch["prompts"]
-            true_answers:List[List[str]] = batch['true_answers']
-            answer_page_idxs:List[List[int]] = batch['answer_page_idx']
-            for j, item in enumerate(zip(prompts,true_answers,answer_page_idxs)):
-                prompt_list, answers, answer_page_idx = item
-                pred_result = [] 
-                for prompt in prompt_list:
-                    p = prompt[-1]['content']
-                    st = time.time()
-                    resp_dict = self.model_inference_fn(
-                        model = self.model,
-                        tokenizer = self.tokenizer,
-                        prompt = p,
-                        max_new_tokens = self.max_new_tokens,
-                        max_length = self.max_length
-                    )
-                    for k in range(len(resp_dict['score'])):
-                        pred_result.append((resp_dict['score'][k], resp_dict['response'][k]))
+        with open(self.log_path, "w") as f:
+            for i, batch in enumerate(tqdm(self.data_loader)): # batch_size=1
+                prompts:List[List[List[Dict]]] = batch["prompts"]
+                true_answers:List[List[str]] = batch['true_answers']
+                answer_page_idxs:List[List[int]] = batch['answer_page_idx']
+                for j, item in enumerate(zip(prompts,true_answers,answer_page_idxs)): # item,item有一个prompt_list
+                    prompt_list, answers, answer_page_idx = item
+                    pred_result = [] 
+                    for prompt in prompt_list:
+                        p:str = prompt[-1]['content']
+                        st = time.time()
+                        resp_dict = self.model_inference_fn(
+                            model = self.model,
+                            tokenizer = self.tokenizer,
+                            prompt = p,
+                            max_new_tokens = self.max_new_tokens,
+                            max_length = self.max_length
+                        )
+                        pred_result.append((resp_dict['score'], resp_dict['response']))
+                        
+                        exec_time = time.time() - st
+                    # 记录model_inference_fn 结果
+                    question = batch['question'][j]
+                    image_paths = batch['image_paths'][j]
+                    ocr_paths = batch['ocr_paths'][j]
+                    layout_paths = batch['layout_paths'][j]
+                    qid = batch['qid'][j]
                     
-                    exec_time = time.time() - st
-                # 记录model_inference_fn 结果
-                question = batch['question'][j]
-                image_paths = batch['image_paths'][j]
-                ocr_paths = batch['ocr_paths'][j]
-                layout_paths = batch['layout_paths'][j]
-                qid = batch['qid'][j]
-                
-                mpdocvqa_item = metrics.MPDocVQAItem(
-                    qid=qid,
-                    question=question,
-                    prediction=pred_result,
-                    image_paths=image_paths,
-                    ocr_paths=ocr_paths,
-                    layout_paths=layout_paths,
-                    answers = answers,
-                    answer_page_idx=answer_page_idx,
-                    exec_time=exec_time
-                )
-                mpdocvqa_items.append(mpdocvqa_item)
+                    mpdocvqa_item = metrics.MPDocVQAItem(
+                        qid=qid,
+                        question=question,
+                        predictions=pred_result,
+                        image_paths=image_paths,
+                        ocr_paths=ocr_paths,
+                        layout_paths=layout_paths,
+                        answers = answers,
+                        answer_page_idx=answer_page_idx,
+                        exec_time=exec_time
+                    )
+                    mpdocvqa_items.append(mpdocvqa_item)
+                    progress = f"[{i*self.batch_size+j}|{len(self.data_loader)}]"
+                    progress_dict = {"progress":progress}
+                    progress_dict.update(mpdocvqa_item.to_result_dict())
+                    f.write(json.dumps(progress_dict, ensure_ascii=False) + "\n")
+                    f.flush()
         anls_score = self.anls.compute_and_save_mpdocvqav2(
             mpdocvqa_items=mpdocvqa_items,
             split="val"

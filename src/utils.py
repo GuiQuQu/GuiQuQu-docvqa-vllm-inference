@@ -43,7 +43,7 @@ def truncate_layout2(layout:str,
     if tokenizer == None:
         return layout
     lines = layout.split("\n")
-    lines_input_ids = [tokenizer([l], return_tensors="pt").input_ids for l in lines]
+    lines_input_ids = [tokenizer([l],return_tensors='pt').input_ids for l in lines]
     reserved_lines = []
     ids_cnt = 0
     is_truncated = False

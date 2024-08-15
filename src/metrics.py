@@ -14,11 +14,11 @@ class MPDocVQAItem(object):
         qid,
         question,
         # predict
-        predictions: List[Tuple[float, str]], # predict result for every page
+        predictions: List[Tuple[float, str]],  # predict result for every page
         # support message
         image_paths: List[str],
         ocr_paths: List[str],
-        layout_paths: List[str],
+        layout_paths: List[str] | None,
         exec_time: float = None,
         # label
         answers: List[str] = None,
@@ -29,12 +29,19 @@ class MPDocVQAItem(object):
         self.predictions = predictions
         self.answers = answers
         self.answer_page_idx = answer_page_idx
-        self.image_paths = image_paths
-        self.ocr_paths = ocr_paths
-        self.layout_paths = layout_paths
+        self.image_paths = [str(image_path) for image_path in image_paths]
+        self.ocr_paths = [str(ocr_path) for ocr_path in ocr_paths]
+        self.layout_paths = (
+            [str(layout_path) for layout_path in layout_paths]
+            if layout_paths[0] is not None
+            else layout_paths
+        )
         self.eval_mode = answers is not None and answer_page_idx is not None
 
         # pred_dict
+
+    def __repr__(self) -> str:
+        return json.dumps(self.to_result_dict(),ensure_ascii=False)
 
     @property
     def predict_answer(self) -> str:
@@ -63,8 +70,8 @@ class MPDocVQAItem(object):
         result = {
             "questionId": self.qid,
             "question": self.question,
-            "pred_answer": self.get_pred_dict["pred_answer"],
-            "pred_answer_idx": self.get_pred_dict["pred_index"],
+            "pred_answer": self.get_pred_dict()["pred_answer"],
+            "pred_answer_idx": self.get_pred_dict()["pred_index"],
         }
         if self.eval_mode:
             result.pop("pred_answer")
@@ -102,6 +109,7 @@ class MPDocVQAItem(object):
             "true_layout_path": self.layout_paths[true_index],
         }
         self.ground_truth = ground_truth
+        return ground_truth
 
 
 # 以前用的方法，现在弃用

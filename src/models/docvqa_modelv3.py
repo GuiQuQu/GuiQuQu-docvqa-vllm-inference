@@ -44,73 +44,88 @@ class MLP(nn.Module):
         return x
 
 
-class MPDocVQAConfig(QWenConfig):
-    model_type = "qwen_for_mpdocvqa"
+# class MPDocVQAConfig(QWenConfig):
+#     model_type = "qwen_for_mpdocvqa"
 
+#     def __init__(
+#         self,
+#         model_path: str = "Qwen-VL-Chat-Int4",
+#         qwenvl_device_map:str = "auto",
+#         lora_config: dict = None,
+#         test_mode: bool = False,
+#         q_lora: bool = True,
+#         gradient_checkpointing: bool = False,
+#         freeze_modules: List[str] = ["transformer.visual"],
+#         **kwargs,
+#     ):
+#         super(MPDocVQAConfig, self).__init__(**kwargs)
+#         self.model_path = model_path
+#         self.qwenvl_device_map = qwenvl_device_map
+#         self.lora_config = lora_config
+#         self.test_mode = test_mode
+#         self.q_lora = q_lora
+#         self.gradient_checkpointing = gradient_checkpointing
+#         self.freeze_modules = freeze_modules
+
+
+# class PreMPDocVQAModel(PreTrainedModel):
+#     config_class = MPDocVQAConfig
+#     supports_gradient_checkpointing = True
+
+#     def __init__(self, config):
+#         super(PreMPDocVQAModel, self).__init__(config)
+
+#     def _set_gradient_checkpointing(self, module, value=False):
+#         if isinstance(module, QWenModel):
+#             module.gradient_checkpointing = value
+
+
+def transform_precision(module: nn.Module, precision):
+    if precision == "fp16":
+        module.half()
+    else:
+        raise ValueError(f"Unsupported precision: {precision}")
+
+
+class MPDocVQAModel(nn.Module):
     def __init__(
         self,
-        model_path: str = "Qwen-VL-Chat-Int4",
-        qwenvl_device_map:str = "auto",
-        lora_config: dict = None,
-        test_mode: bool = False,
-        q_lora: bool = True,
-        gradient_checkpointing: bool = False,
-        freeze_modules: List[str] = ["transformer.visual"],
-        **kwargs,
+        qwenvl_model_path,
+        qwenvl_device_map,
+        on_test_mode,
+        lora_config,
+        q_lora,
+        gradient_checkpointing,
+        freeze_modules,
+        precision="fp16",
     ):
-        super(MPDocVQAConfig, self).__init__(**kwargs)
-        self.model_path = model_path
-        self.qwenvl_device_map = qwenvl_device_map
-        self.lora_config = lora_config
-        self.test_mode = test_mode
-        self.q_lora = q_lora
-        self.gradient_checkpointing = gradient_checkpointing
-        self.freeze_modules = freeze_modules
-
-
-class PreMPDocVQAModel(PreTrainedModel):
-    config_class = MPDocVQAConfig
-    supports_gradient_checkpointing = True
-    
-    def __init__(self, config):
-        super(PreMPDocVQAModel, self).__init__(config)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, QWenModel):
-            module.gradient_checkpointing = value
-
-
-class MPDocVQAModel(PreMPDocVQAModel):
-    def __init__(self,config: MPDocVQAConfig):
-        super(MPDocVQAModel, self).__init__(config)
-        gradient_checkpointing = config.gradient_checkpointing # 这个属性在后续from_pretrained中会被移除
-        self.config = config
-        self.on_test_mode = config.test_mode
-        if not config.test_mode:
-            config.use_cache = False
-        self.qwenvl: QWenLMHeadModelForDocVQA = (
-            QWenLMHeadModelForDocVQA.from_pretrained(
-                config.model_path,
-                device_map=config.qwenvl_device_map,
-                config=config,
-                quantization_config=(
-                    GPTQConfig(bits=4, disable_exllama=True)
-                    if config.lora_config and config.q_lora
-                    else None
-                ),
-            )
+        super(MPDocVQAModel, self).__init__()
+        qwenvl_config = QWenConfig.from_pretrained(qwenvl_model_path)
+        self.qwenvl = QWenLMHeadModelForDocVQA.from_pretrained(
+            qwenvl_model_path,
+            device_map=qwenvl_device_map,
+            config=qwenvl_config,
+            quantization_config=(
+                GPTQConfig(bits=4, disable_exllama=True)
+                if lora_config and q_lora
+                else None
+            ),
         )
-        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(config.model_path)
-        self.pad_id = self.tokenizer.eod_id
-        self.freeze_params(config.freeze_modules)
-        if gradient_checkpointing and not config.lora_config:
-            self.qwenvl.gradient_checkpointing_enable()
+        self.page_mlp = MLP([qwenvl_config.hidden_size, 512, 256, 1])
+        self.on_test_mode = on_test_mode
+        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(qwenvl_model_path)
+        self.tokenizer.pad_token_id = self.tokenizer.eod_id
+        self.pad_token = self.tokenizer.eod_id
+        # if gradient_checkpointing and not lora_config:
+        #     self.qwenvl.gradient_checkpointing_enable()
+        if lora_config:
+            self.lora_model(lora_config, q_lora, gradient_checkpointing)
 
-        if config.lora_config:
-            self.lora_model(
-                config.lora_config, config.q_lora, gradient_checkpointing
-            )
-        self.page_mlp = MLP([config.hidden_size, 512, 256, 1])
+        self.freeze_params(freeze_modules)
+        transform_precision(self, precision)
+
+    def gradient_checkpointing_enable(self):
+        self.qwenvl.gradient_checkpointing_enable()
 
     def lora_model(self, lora_config, q_lora: bool, gradient_checkpointing):
         lora_config = LoraConfig(**lora_config)
@@ -143,7 +158,7 @@ class MPDocVQAModel(PreMPDocVQAModel):
         )
 
         bsz, _ = input_ids.size()
-        llm_loss = outputs.loss.view(bsz, -1)  # [bsz,seq_len]
+
         hidden_states = outputs.hidden_states[-1]
         llm_embedding = self.get_last_one_hidden_states(
             hidden_states, input_ids
@@ -152,6 +167,7 @@ class MPDocVQAModel(PreMPDocVQAModel):
         score = torch.sigmoid(logits)
         loss = None
         if cls_labels is not None and labels is not None:
+            llm_loss = outputs.loss.view(bsz, -1)  # [bsz,seq_len]
             classification_loss_fct = nn.BCEWithLogitsLoss(reduction="none")
             cls_labels = cls_labels.to(device=logits.device, dtype=logits.dtype)
             cls_loss = classification_loss_fct(
@@ -194,27 +210,26 @@ class MPDocVQAModel(PreMPDocVQAModel):
 
             return hidden_states[bsz_idx, last_idx, :]  # [bsz,hidden_size]
 
-    def generate(self, *args, **kwargs):
-        return self.qwenvl.generate(*args, **kwargs)
-
+    # def generate(self, *args, **kwargs):
+    #     return self.qwenvl.generate(*args, **kwargs)
+    @torch.no_grad()
     def predict(
         self,
         tokenizer: PreTrainedTokenizer,
         query: str,
         history: Optional[HistoryType],
-        generation_config: Optional[GenerationConfig],
         system: str = "You are a helpful assistant.",
         append_history: bool = True,
         stream: Optional[bool] = _SENTINEL,
         stop_words_ids: Optional[List[List[int]]] = None,
+        generation_config: Optional[GenerationConfig] = None,
         **kwargs,
-    ) -> Tuple[str, HistoryType]:
+    ) -> Tuple[str, float, HistoryType]:
         generation_config = (
             generation_config
             if generation_config is not None
-            else self.generation_config
+            else self.qwenvl.generation_config
         )
-
         assert stream is _SENTINEL, _ERROR_STREAM_IN_CHAT
         assert generation_config.chat_format == "chatml", _ERROR_BAD_CHAT_FORMAT
         if history is None:
@@ -237,18 +252,19 @@ class MPDocVQAModel(PreMPDocVQAModel):
         stop_words_ids.extend(
             get_stop_words_ids(generation_config.chat_format, tokenizer)
         )
-        input_ids = torch.tensor([context_tokens]).to(self.device)
+        input_ids = torch.tensor([context_tokens]).to(self.qwenvl.device)
         attention_mask = torch.ne(input_ids, self.tokenizer.pad_token_id)
         # predict score
+        # score [bsz,1]
         _, score = self.forward(input_ids=input_ids, attention_mask=attention_mask)
-        outputs = self.generate(
+        outputs = self.qwenvl.generate(
             input_ids,
             stop_words_ids=stop_words_ids,
             return_dict_in_generate=False,
             generation_config=generation_config,
             **kwargs,
         )
-
+        # response:str
         response = decode_tokens(
             outputs[0],
             tokenizer,
@@ -261,7 +277,7 @@ class MPDocVQAModel(PreMPDocVQAModel):
 
         if append_history:
             history.append((query, response))
-
+        score = score.view(-1).cpu().numpy().tolist()[0]
         return response, score, history
 
 
@@ -271,20 +287,27 @@ def mpdocvqa_model_inference(
     prompt: List[str] | str,
     max_new_tokens: int,
     max_length: int,
-) -> Dict[str, List[Any]]:
+) -> Dict[str, List[Any] | Any]:
     resp_list, score_list = [], []
+    is_str = False
     if isinstance(prompt, str):
         prompt = [prompt]
+        is_str = True
     for p in prompt:
         resp, score, _ = model.predict(
-            tokenizer, p, None, None, max_new_tokens=max_new_tokens
+            tokenizer,
+            p,
+            history=None,
+            append_history=None,
+            max_new_tokens=max_new_tokens,
         )
+        # resp [bsz] score [bsz,1]
         resp_list.append(resp)
         score_list.append(score)
 
     return {
-        "response": resp_list,
-        "score": score_list,
+        "response": resp_list if not is_str else resp_list[0],
+        "score": score_list if not is_str else score_list[0],
     }
 
 

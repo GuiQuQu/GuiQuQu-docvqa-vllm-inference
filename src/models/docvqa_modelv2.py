@@ -1,12 +1,18 @@
 from typing import Any, Dict, List, Optional, Tuple
-from torch import nn
+import sys
+
+sys.path.append("/home/klwang/code/GuiQuQu-docvqa-vllm-inference/src")
+
 import torch
-from einops import repeat
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+import torch.nn as nn
+from transformers import (
+    PreTrainedModel,
+    PretrainedConfig,
+    PreTrainedTokenizer,
+    GenerationConfig,
+)
 from transformers import GPTQConfig
-from transformers import PreTrainedModel, PretrainedConfig, PreTrainedTokenizer
-from transformers import PreTrainedTokenizer, GenerationConfig, StoppingCriteriaList
-from transformers.generation.logits_process import LogitsProcessorList
+from einops import rearrange, repeat
 
 from Qwen_VL.modeling_qwen import (
     QWenLMHeadModelForDocVQA,
@@ -16,6 +22,7 @@ from Qwen_VL.modeling_qwen import (
     _ERROR_BAD_CHAT_FORMAT,
     _ERROR_STREAM_IN_CHAT,
 )
+
 from Qwen_VL.configuration_qwen import QWenConfig
 from Qwen_VL.tokenization_qwen import QWenTokenizer
 from Qwen_VL.qwen_generation_utils import (
@@ -44,88 +51,71 @@ class MLP(nn.Module):
         return x
 
 
-class MPDocVQAConfig(QWenConfig):
-    model_type = "qwen_for_mpdocvqa"
+class MPDocVQAConfig(PretrainedConfig):
+    model_type = "mpdoc_vqa_model"
 
     def __init__(
         self,
-        model_path: str = "Qwen-VL-Chat-Int4",
-        qwenvl_device_map:str = "auto",
-        lora_config: dict = None,
-        test_mode: bool = False,
-        q_lora: bool = True,
-        gradient_checkpointing: bool = False,
+        qwenvl_path: str = "Qwen-VL-Chat-Int4",
+        qwenvl_device_map: str = "auto",
         freeze_modules: List[str] = ["transformer.visual"],
+        use_lora: bool = False,
+        use_q_lora: bool = False,
         **kwargs,
     ):
         super(MPDocVQAConfig, self).__init__(**kwargs)
-        self.model_path = model_path
+        self.qwenvl_path = qwenvl_path
         self.qwenvl_device_map = qwenvl_device_map
-        self.lora_config = lora_config
-        self.test_mode = test_mode
-        self.q_lora = q_lora
-        self.gradient_checkpointing = gradient_checkpointing
         self.freeze_modules = freeze_modules
+        self.qwenvl_config_path = f"{self.qwenvl_path}/config.json"
+        self.use_lora = use_lora
+        self.use_q_lora = use_q_lora
 
 
 class PreMPDocVQAModel(PreTrainedModel):
     config_class = MPDocVQAConfig
     supports_gradient_checkpointing = True
-    
+
     def __init__(self, config):
         super(PreMPDocVQAModel, self).__init__(config)
 
     def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, QWenModel):
+        if isinstance(module, QWenModel) or isinstance(
+            module, QWenLMHeadModelForDocVQA
+        ):
             module.gradient_checkpointing = value
 
 
 class MPDocVQAModel(PreMPDocVQAModel):
-    def __init__(self,config: MPDocVQAConfig):
+    def __init__(self, config: MPDocVQAConfig):
         super(MPDocVQAModel, self).__init__(config)
-        gradient_checkpointing = config.gradient_checkpointing # 这个属性在后续from_pretrained中会被移除
-        self.config = config
-        self.on_test_mode = config.test_mode
-        if not config.test_mode:
-            config.use_cache = False
-        self.qwenvl: QWenLMHeadModelForDocVQA = (
-            QWenLMHeadModelForDocVQA.from_pretrained(
-                config.model_path,
-                device_map=config.qwenvl_device_map,
-                config=config,
-                quantization_config=(
-                    GPTQConfig(bits=4, disable_exllama=True)
-                    if config.lora_config and config.q_lora
-                    else None
-                ),
-            )
+        # necessary part
+        self.gradient_checkpointing = False
+        # custom part
+        qwenvl_config = QWenConfig.from_pretrained(config.qwenvl_path)
+        self.qwenvl = QWenLMHeadModelForDocVQA.from_pretrained(
+            config.qwenvl_path,
+            config=qwenvl_config,
+            device_map=config.qwenvl_device_map,
+            quantization_config=(
+                GPTQConfig(bits=4, disable_exllama=True)
+                if config.use_lora and config.use_q_lora
+                else None
+            ),
         )
-        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(config.model_path)
+
+        self.tokenizer: QWenTokenizer = QWenTokenizer.from_pretrained(
+            config.qwenvl_path
+        )
         self.pad_id = self.tokenizer.eod_id
         self.freeze_params(config.freeze_modules)
-        if gradient_checkpointing and not config.lora_config:
-            self.qwenvl.gradient_checkpointing_enable()
+        self.page_mlp = MLP([qwenvl_config.hidden_size, 512, 256, 1])
 
-        if config.lora_config:
-            self.lora_model(
-                config.lora_config, config.q_lora, gradient_checkpointing
-            )
-        self.page_mlp = MLP([config.hidden_size, 512, 256, 1])
-
-    def lora_model(self, lora_config, q_lora: bool, gradient_checkpointing):
-        lora_config = LoraConfig(**lora_config)
-        if q_lora:
-            self.qwenvl = prepare_model_for_kbit_training(
-                self.qwenvl, use_gradient_checkpointing=gradient_checkpointing
-            )
-        self.qwenvl = get_peft_model(self.qwenvl, lora_config)
-        if gradient_checkpointing:
-            self.qwenvl.enable_input_require_grads()
-
-    def freeze_params(self, freeze_modules):
+    def freeze_params(self, freeze_modules: List[str]):
         for name, param in self.qwenvl.named_parameters():
-            if any(freeze_module in name for freeze_module in freeze_modules):
-                param.requires_grad = False
+            for module in freeze_modules:
+                if module in name:
+                    param.requires_grad = False
 
     def forward(
         self,
@@ -265,35 +255,47 @@ class MPDocVQAModel(PreMPDocVQAModel):
         return response, score, history
 
 
-def mpdocvqa_model_inference(
-    model: MPDocVQAModel,
-    tokenizer,
-    prompt: List[str] | str,
-    max_new_tokens: int,
-    max_length: int,
-) -> Dict[str, List[Any]]:
-    resp_list, score_list = [], []
-    if isinstance(prompt, str):
-        prompt = [prompt]
-    for p in prompt:
-        resp, score, _ = model.predict(
-            tokenizer, p, None, None, max_new_tokens=max_new_tokens
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+
+def get_lora_model_for_train(
+    model_config: MPDocVQAConfig, lora_config, use_q_lora, use_graditent_checkpointing
+):
+    base_model = MPDocVQAModel(model_config)
+    lora_config = LoraConfig(**lora_config)
+    if use_q_lora:
+        # base_model.qwenvl = prepare_model_for_kbit_training(
+        #     base_model.qwenvl, use_gradient_checkpointing=use_graditent_checkpointing
+        # )
+        base_model = prepare_model_for_kbit_training(
+            base_model, use_gradient_checkpointing=use_graditent_checkpointing
         )
-        resp_list.append(resp)
-        score_list.append(score)
 
-    return {
-        "response": resp_list,
-        "score": score_list,
-    }
+    lora_model = get_peft_model(base_model, lora_config)
+    if use_graditent_checkpointing:
+        lora_model.enable_input_require_grads()
+
+    return base_model
 
 
-def mpvqa_get_input_ids(prompt: str, tokenizer: PreTrainedTokenizer) -> List[int]:
-    _, content_tokens = make_context(
-        tokenizer,
-        prompt,
-        history=None,
-        system="You are a helpful assistant.",
-        chat_format="chatml",
+if __name__ == "__main__":
+    config = MPDocVQAConfig(
+        qwenvl_path="/home/klwang/pretrain-model/Qwen-VL-Chat-Int4",
+        qwenvl_device_map="auto",
+        freeze_modules=["transformer.visual"],
+        use_lora=True,
+        use_q_lora=True,
     )
-    return content_tokens
+    lora_config = {
+        "r": 64,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "bias": "none",
+        "target_modules": ["c_attn","attn.c_proj","w1","w2",],
+        "task_type": "CAUSAL_LM",
+        "modules_to_save": ["page_mlp"],
+    }
+    lora_model = get_lora_model_for_train(
+        config, lora_config, use_q_lora=True, use_graditent_checkpointing=True
+    )
+    print(lora_model)

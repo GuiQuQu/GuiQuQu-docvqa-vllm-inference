@@ -522,35 +522,12 @@ def train():
         if len(training_args.fsdp) > 0 or deepspeed.is_deepspeed_zero3_enabled():
             logging.warning("FSDP or ZeRO3 are not incompatible with QLoRA.")
 
-    # # Set RoPE scaling factor
-    # config = transformers.AutoConfig.from_pretrained(
-    #     model_args.model_name_or_path,
-    #     cache_dir=training_args.cache_dir,
-    #     trust_remote_code=True,
-    # )
-    # config.use_cache = False
-
-    # # Load model and tokenizer
-    # model = transformers.AutoModelForCausalLM.from_pretrained(
-    #     model_args.model_name_or_path,
-    #     config=config,
-    #     cache_dir=training_args.cache_dir,
-    #     device_map=device_map,
-    #     trust_remote_code=True,
-    #     quantization_config=GPTQConfig(
-    #         bits=4, disable_exllama=True
-    #     )
-    #     if training_args.use_lora and lora_args.q_lora
-    #     else None,
-    # )
-    from models.docvqa_model import MPDocVQAModel, MPDocVQAConfig
-
-    qwenvl_config: QWenConfig = QWenConfig.from_pretrained(model_args.model_name_or_path)
-    if training_args.use_lora:
-        config = MPDocVQAConfig(
-            model_path=model_args.model_name_or_path,
-            qwenvl_device_map=device_map,
-            lora_config={
+    from models.docvqa_modelv3 import MPDocVQAModel
+    model = MPDocVQAModel(
+        qwenvl_model_path=model_args.model_name_or_path,
+        qwenvl_device_map=device_map,
+        on_test_mode=False,
+        lora_config={
                 "r": lora_args.lora_r,
                 "lora_alpha": lora_args.lora_alpha,
                 "lora_dropout": lora_args.lora_dropout,
@@ -558,24 +535,11 @@ def train():
                 "target_modules": lora_args.lora_target_modules,
                 "task_type": "CAUSAL_LM",
                 "modules_to_save": None,
-            },
-            q_lora=lora_args.q_lora,
-            gradient_checkpointing=training_args.gradient_checkpointing,
-            freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
-            **qwenvl_config.to_dict(),
-        )
-        model = MPDocVQAModel(config=config)
-    else:
-        config = MPDocVQAConfig(
-            model_path=model_args.model_name_or_path,
-            device_map=device_map,
-            lora_config=None,
-            q_lora=False,
-            gradient_checkpointing=training_args.gradient_checkpointing,
-            freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
-            **qwenvl_config.to_dict(),
-        )
-        model = MPDocVQAModel(config=config)
+            } if training_args.use_lora else None,
+        q_lora=lora_args.q_lora,
+        gradient_checkpointing=training_args.gradient_checkpointing,
+        freeze_modules=["transformer.visual"] if training_args.fix_vit else [],
+    )
 
     # if not training_args.use_lora:
     #     if training_args.fix_vit and hasattr(model,'transformer') and hasattr(model.transformer,'visual'):
@@ -601,10 +565,9 @@ def train():
     trainer = Trainer(
         model=model, tokenizer=tokenizer, args=training_args, **data_module
     )
-    breakpoint()
     trainer.train()
     trainer.save_state()
-    trainer.save_model()
+
     safe_save_model_for_hf_trainer(
         trainer=trainer, output_dir=training_args.output_dir, bias=lora_args.lora_bias
     )

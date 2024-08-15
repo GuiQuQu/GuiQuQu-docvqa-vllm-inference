@@ -1,6 +1,9 @@
 import json
 import math
 from typing import List,Dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MPBBox(object):
     def __init__(self,bbox_dict):
@@ -19,12 +22,14 @@ def mp_open_ocr_data(json_path: str):
     ocr_data["page_width"] = bbox.width
     ocr_data["page_height"] = bbox.height
     segments = []
-    for line in data.get("LINES",[]):
+    for line in data.get("LINE",[]):
         item = {}
         item['text'] = line["Text"]
         item['bbox'] = MPBBox(line["Geometry"]["BoundingBox"])
         item['confidence'] = line["Confidence"]
         segments.append(item)
+    if segments == []:
+        logger.warning("No OCR data in %s", json_path)
     ocr_data["segments"] = segments
     return ocr_data
 
