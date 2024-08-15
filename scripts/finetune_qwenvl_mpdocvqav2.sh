@@ -37,7 +37,7 @@ python ${PROJECT_DIR}/src/finetune_qwenvl_mpdocvqav2.py \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --seed 2024 \
-    --save_steps 5 \
+    --save_steps 250 \
     --save_total_limit 50 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \
